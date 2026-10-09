@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "BHAI GARAGE"
+description = "A portable control plane for managing VPS instances on user-owned Linux hosts. Includes secure admin access, an audited VPS lifecycle API, persistent inventory, and a clearly separated development simulator until real KVM hosts are connected."
+version = "1.0.0"
+id = "artifacts/bhai-garage"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22649
+
+[services.development]
+run = "pnpm --filter @workspace/bhai-garage run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/bhai-garage", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/bhai-garage/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22649"
+BASE_PATH = "/"

@@ -1,45 +1,59 @@
-# [Project name]
+# BHAI GARAGE
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A portable VPS hosting control-plane foundation with a simulation-first dashboard and an optional authenticated KVM/libvirt host agent.
 
 ## Run & Operate
 
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- `pnpm run typecheck` — typecheck all libraries, artifacts, and packages
+- `pnpm run build` — typecheck and build all packages
+- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from OpenAPI
+- `pnpm --filter @workspace/db run push` — apply DB schema changes (development)
+- `pnpm --filter @workspace/api-server run test` — API/auth/persistence/lifecycle integration tests
+- `pnpm --filter @workspace/host-agent run test` — host-agent safety/configuration tests
+- Required env: `DATABASE_URL`, `SESSION_SECRET`, and `BHAI_SETUP_TOKEN` for initial admin bootstrap
 
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
 - API: Express 5
 - DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- Validation: Zod
+- API codegen: Orval from the OpenAPI spec
+- Host agent: Node.js 24, local libvirt socket, `virsh`, `qemu-img`, `cloud-localds`
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/bhai-garage` — React/Vite admin dashboard
+- `artifacts/api-server` — REST API and host-agent protocol
+- `lib/api-spec/openapi.yaml` — API contract; generated clients/schemas are in `lib/api-client-react` and `lib/api-zod`
+- `lib/db/src/schema` — PostgreSQL/Drizzle schema
+- `packages/host-agent` — Linux host agent and KVM/libvirt adapter
+- `docker-compose.yml`, Dockerfiles, and `README.md` — portable deployment guidance
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Simulation is the safe default and its hosts, VPS records, addresses, and metrics are labeled as simulated.
+- Real lifecycle requests are queued per host and authenticated with a hashed host-specific bearer token.
+- The agent executes only allowlisted VM lifecycle actions; it has no browser shell, Docker socket, or host-root API.
+- First-admin setup is disabled unless `BHAI_SETUP_TOKEN` is configured; sessions require `SESSION_SECRET`.
+- The real provider supports only local `qemu:///system`, allowlisted cloud image IDs, and SSH-key injection.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+The admin can inspect host resource health, search and filter VPS inventory, create and manage simulated instances, register real hosts, view agent status, and review audit events. Real VM creation needs compatible external hardware and networking.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+Keep the project exportable and self-hostable; do not describe simulation or a dashboard as free/live compute.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Apply the DB schema before starting the API against a fresh database.
+- Real provisioning needs an online host, a supported cloud-init QCOW2 image on that host, and a valid SSH public key.
+- Docker Compose's libvirt profile requires a compatible Linux KVM host and the actual libvirt socket group ID. It cannot be verified inside this workspace.
 
 ## Pointers
 
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- See the `pnpm-workspace` skill for workspace structure and TypeScript setup.
+- See `README.md` for Compose deployment, host-agent setup, security, and physical hosting requirements.

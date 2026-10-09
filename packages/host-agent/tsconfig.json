@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "lib": ["es2022", "dom", "dom.iterable"],
+    "types": ["node"],
+    "moduleResolution": "bundler"
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

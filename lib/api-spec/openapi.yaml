@@ -1,36 +1,875 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
+  # Do not change the title; generated imports depend on it.
   title: Api
   version: 0.1.0
-  description: API specification
+  description: >-
+    Portable VPS control-plane API. Dashboard routes require the secure admin
+    session cookie; host-agent routes require a host-scoped bearer token.
 servers:
   - url: /api
-    description: Base API path
+    description: API base path
 tags:
   - name: health
-    description: Health operations
+  - name: auth
+  - name: dashboard
+  - name: vps
+  - name: hosts
+  - name: audit
+  - name: host-agent
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
-      summary: Health check
-      description: Returns server health status
+      summary: Liveness probe
       responses:
         "200":
-          description: Healthy
+          description: API process is alive
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /readyz:
+    get:
+      operationId: readinessCheck
+      tags: [health]
+      summary: Readiness probe
+      responses:
+        "200":
+          description: Database is reachable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+        "503":
+          description: Database is not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /auth/setup-status:
+    get:
+      operationId: getSetupStatus
+      tags: [auth]
+      summary: Check whether the admin account is configured
+      responses:
+        "200":
+          description: Setup and session state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthState"
+  /auth/setup:
+    post:
+      operationId: setupAdmin
+      tags: [auth]
+      summary: Create the one-time initial admin account
+      description: Requires BHAI_SETUP_TOKEN in production. Disabled after first account creation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminSetupInput"
+      responses:
+        "201":
+          description: Admin account created and session issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthState"
+        "400":
+          description: Invalid setup input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Setup token is invalid or setup is disabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Admin account already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /auth/login:
+    post:
+      operationId: loginAdmin
+      tags: [auth]
+      summary: Sign in to the admin dashboard
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminLoginInput"
+      responses:
+        "200":
+          description: Authenticated session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthState"
+        "401":
+          description: Email or password is incorrect
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Too many attempts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /auth/logout:
+    post:
+      operationId: logoutAdmin
+      tags: [auth]
+      summary: Revoke the current admin session
+      responses:
+        "200":
+          description: Session revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthState"
+  /auth/session:
+    get:
+      operationId: getAdminSession
+      tags: [auth]
+      summary: Read the current authenticated admin session
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Authenticated admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthState"
+        "401":
+          description: No valid session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /dashboard:
+    get:
+      operationId: getDashboard
+      tags: [dashboard]
+      summary: Get fleet totals, resource usage, and recent activity
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Fleet dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+  /vps:
+    get:
+      operationId: listVps
+      tags: [vps]
+      summary: Search and filter VPS instances
+      security:
+        - sessionCookie: []
+      parameters:
+        - in: query
+          name: search
+          schema:
+            type: string
+            maxLength: 120
+        - in: query
+          name: status
+          schema:
+            $ref: "#/components/schemas/VpsStatusFilter"
+      responses:
+        "200":
+          description: VPS instances
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VpsInstance"
+    post:
+      operationId: createVps
+      tags: [vps]
+      summary: Create a VPS in simulation or queue provisioning on an online host
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VpsCreateInput"
+      responses:
+        "201":
+          description: VPS created or queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VpsMutationResult"
+        "400":
+          description: Invalid resource allocation or image
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: No connected host is available in real mode
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /vps/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getVps
+      tags: [vps]
+      summary: Get one VPS instance
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: VPS instance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VpsInstance"
+        "404":
+          description: VPS not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /vps/{id}/actions:
+    post:
+      operationId: operateVps
+      tags: [vps]
+      summary: Start, stop, or restart a VPS
+      security:
+        - sessionCookie: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VpsActionInput"
+      responses:
+        "200":
+          description: Lifecycle action completed in simulation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VpsMutationResult"
+        "202":
+          description: Lifecycle action queued for a host agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VpsMutationResult"
+        "404":
+          description: VPS not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Action is not valid in the current VPS state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /vps/{id}/delete:
+    post:
+      operationId: deleteVps
+      tags: [vps]
+      summary: Delete a VPS, or queue deletion on its host
+      security:
+        - sessionCookie: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: VPS deleted in simulation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VpsDeleteResult"
+        "202":
+          description: VPS deletion queued for its host agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VpsDeleteResult"
+        "404":
+          description: VPS not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /hosts:
+    get:
+      operationId: listHosts
+      tags: [hosts]
+      summary: List connected and registered virtualization hosts
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Host inventory
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Host"
+    post:
+      operationId: registerHost
+      tags: [hosts]
+      summary: Register a host and issue a one-time agent token
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HostCreateInput"
+      responses:
+        "201":
+          description: Registered host and one-time token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HostCreateResult"
+  /audit:
+    get:
+      operationId: listAuditEvents
+      tags: [audit]
+      summary: View recent administrative and host-agent events
+      security:
+        - sessionCookie: []
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 30
+      responses:
+        "200":
+          description: Recent audit events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditEvent"
+  /agent/heartbeat:
+    post:
+      operationId: agentHeartbeat
+      tags: [host-agent]
+      summary: Submit host capacity and health telemetry
+      security:
+        - hostAgentToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HostHeartbeatInput"
+      responses:
+        "200":
+          description: Host is registered and metrics were accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentHeartbeatResult"
+        "401":
+          description: Invalid agent token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /agent/operations/next:
+    post:
+      operationId: claimAgentOperation
+      tags: [host-agent]
+      summary: Claim one pending VM lifecycle operation for this host
+      security:
+        - hostAgentToken: []
+      responses:
+        "200":
+          description: Claimed operation, or null when the queue is empty
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentClaimResult"
+        "401":
+          description: Invalid agent token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /agent/operations/{operationId}/complete:
+    post:
+      operationId: completeAgentOperation
+      tags: [host-agent]
+      summary: Report the result of a claimed operation
+      security:
+        - hostAgentToken: []
+      parameters:
+        - in: path
+          name: operationId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentCompleteInput"
+      responses:
+        "200":
+          description: Operation result recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentCompleteResult"
+        "404":
+          description: Operation is missing or is not assigned to this host
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: bg_session
+    hostAgentToken:
+      type: http
+      scheme: bearer
   schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
     HealthStatus:
       type: object
+      required: [status]
       properties:
         status:
           type: string
-      required:
-        - status
+          enum: [ok]
+        service:
+          type: string
+    AuthState:
+      type: object
+      required: [configured, authenticated, setupEnabled, provisioner, email]
+      properties:
+        configured:
+          type: boolean
+        authenticated:
+          type: boolean
+        setupEnabled:
+          type: boolean
+        provisioner:
+          type: string
+          enum: [simulation, libvirt]
+        email:
+          type: [string, "null"]
+    AdminSetupInput:
+      type: object
+      required: [email, password]
+      properties:
+        setupToken:
+          type: string
+          maxLength: 256
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          minLength: 12
+          maxLength: 128
+    AdminLoginInput:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          minLength: 1
+          maxLength: 128
+    VpsStatus:
+      type: string
+      enum: [provisioning, running, stopped, deleting, failed]
+    VpsStatusFilter:
+      type: string
+      enum: [all, provisioning, running, stopped, deleting, failed]
+    VpsInstance:
+      type: object
+      required: [id, name, hostId, hostName, ipAddress, osImage, vcpus, memoryMb, diskGb, status, provider, cpuUsagePercent, memoryUsedMb, diskUsedGb, networkRxMbps, networkTxMbps, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        hostId:
+          type: [string, "null"]
+          format: uuid
+        hostName:
+          type: [string, "null"]
+        ipAddress:
+          type: [string, "null"]
+        osImage:
+          type: string
+        vcpus:
+          type: integer
+        memoryMb:
+          type: integer
+        diskGb:
+          type: integer
+        status:
+          $ref: "#/components/schemas/VpsStatus"
+        provider:
+          type: string
+          enum: [simulation, libvirt]
+        cpuUsagePercent:
+          type: number
+        memoryUsedMb:
+          type: integer
+        diskUsedGb:
+          type: number
+        networkRxMbps:
+          type: number
+        networkTxMbps:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    VpsCreateInput:
+      type: object
+      required: [name, osImage, vcpus, memoryMb, diskGb]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 48
+          pattern: "^[a-zA-Z0-9][a-zA-Z0-9.-]*$"
+        osImage:
+          type: string
+          enum: [ubuntu-24.04, ubuntu-22.04, debian-12, rocky-9]
+        vcpus:
+          type: integer
+          minimum: 1
+          maximum: 32
+        memoryMb:
+          type: integer
+          minimum: 512
+          maximum: 262144
+        diskGb:
+          type: integer
+          minimum: 5
+          maximum: 5000
+        hostId:
+          type: [string, "null"]
+          format: uuid
+        sshPublicKey:
+          type: string
+          maxLength: 8192
+    VpsActionInput:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [start, stop, restart]
+    VpsMutationResult:
+      type: object
+      required: [vps, queued, operationId, simulation]
+      properties:
+        vps:
+          $ref: "#/components/schemas/VpsInstance"
+        queued:
+          type: boolean
+        operationId:
+          type: [string, "null"]
+          format: uuid
+        simulation:
+          type: boolean
+    VpsDeleteResult:
+      type: object
+      required: [deleted, queued, operationId]
+      properties:
+        deleted:
+          type: boolean
+        queued:
+          type: boolean
+        operationId:
+          type: [string, "null"]
+          format: uuid
+    HostStatus:
+      type: string
+      enum: [online, offline]
+    Host:
+      type: object
+      required: [id, name, hostname, status, simulation, totalVcpus, cpuUsagePercent, totalMemoryMb, usedMemoryMb, diskTotalGb, diskUsedGb, networkRxMbps, networkTxMbps, agentVersion, lastSeenAt, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        hostname:
+          type: [string, "null"]
+        status:
+          $ref: "#/components/schemas/HostStatus"
+        simulation:
+          type: boolean
+        totalVcpus:
+          type: integer
+        cpuUsagePercent:
+          type: number
+        totalMemoryMb:
+          type: integer
+        usedMemoryMb:
+          type: integer
+        diskTotalGb:
+          type: number
+        diskUsedGb:
+          type: number
+        networkRxMbps:
+          type: number
+        networkTxMbps:
+          type: number
+        agentVersion:
+          type: [string, "null"]
+        lastSeenAt:
+          type: [string, "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+    HostCreateInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 80
+    HostCreateResult:
+      type: object
+      required: [host, agentToken]
+      properties:
+        host:
+          $ref: "#/components/schemas/Host"
+        agentToken:
+          type: string
+          description: Shown once. Store securely as BHAI_AGENT_TOKEN on the host.
+    AuditEvent:
+      type: object
+      required: [id, actor, action, resourceType, resourceId, details, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        actor:
+          type: string
+        action:
+          type: string
+        resourceType:
+          type: string
+        resourceId:
+          type: [string, "null"]
+        details:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+    DashboardSummary:
+      type: object
+      required: [provider, hosts, instances, resources, recentActivity]
+      properties:
+        provider:
+          type: string
+          enum: [simulation, libvirt]
+        hosts:
+          type: object
+          required: [total, online]
+          properties:
+            total:
+              type: integer
+            online:
+              type: integer
+        instances:
+          type: object
+          required: [total, running, stopped, failed]
+          properties:
+            total:
+              type: integer
+            running:
+              type: integer
+            stopped:
+              type: integer
+            failed:
+              type: integer
+        resources:
+          type: object
+          required: [cpuUsagePercent, memoryUsedMb, memoryTotalMb, diskUsedGb, diskTotalGb, networkRxMbps, networkTxMbps]
+          properties:
+            cpuUsagePercent:
+              type: number
+            memoryUsedMb:
+              type: integer
+            memoryTotalMb:
+              type: integer
+            diskUsedGb:
+              type: number
+            diskTotalGb:
+              type: number
+            networkRxMbps:
+              type: number
+            networkTxMbps:
+              type: number
+        recentActivity:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEvent"
+    HostHeartbeatInput:
+      type: object
+      required: [hostname, agentVersion, totalVcpus, cpuUsagePercent, totalMemoryMb, usedMemoryMb, diskTotalGb, diskUsedGb, networkRxMbps, networkTxMbps]
+      properties:
+        hostname:
+          type: string
+          maxLength: 255
+        agentVersion:
+          type: string
+          maxLength: 40
+        totalVcpus:
+          type: integer
+          minimum: 1
+        cpuUsagePercent:
+          type: number
+          minimum: 0
+          maximum: 100
+        totalMemoryMb:
+          type: integer
+          minimum: 1
+        usedMemoryMb:
+          type: integer
+          minimum: 0
+        diskTotalGb:
+          type: number
+          minimum: 0
+        diskUsedGb:
+          type: number
+          minimum: 0
+        networkRxMbps:
+          type: number
+          minimum: 0
+        networkTxMbps:
+          type: number
+          minimum: 0
+    AgentHeartbeatResult:
+      type: object
+      required: [accepted]
+      properties:
+        accepted:
+          type: boolean
+    AgentClaimResult:
+      type: object
+      required: [operation]
+      properties:
+        operation:
+          oneOf:
+            - $ref: "#/components/schemas/AgentOperation"
+            - type: "null"
+    AgentOperation:
+      type: object
+      required: [id, action, vps]
+      properties:
+        id:
+          type: string
+          format: uuid
+        action:
+          type: string
+          enum: [create, start, stop, restart, delete]
+        vps:
+          $ref: "#/components/schemas/VpsInstance"
+        sshPublicKey:
+          type: [string, "null"]
+    AgentCompleteInput:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+        ipAddress:
+          type: [string, "null"]
+          format: ipv4
+        errorMessage:
+          type: [string, "null"]
+          maxLength: 500
+        cpuUsagePercent:
+          type: number
+          minimum: 0
+          maximum: 100
+        memoryUsedMb:
+          type: integer
+          minimum: 0
+        diskUsedGb:
+          type: number
+          minimum: 0
+    AgentCompleteResult:
+      type: object
+      required: [accepted]
+      properties:
+        accepted:
+          type: boolean
 

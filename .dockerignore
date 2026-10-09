@@ -1,0 +1,16 @@
+.git
+.cache
+.local
+.agents
+.replit
+.env
+.env.*
+!.env.example
+**/node_modules
+**/dist
+**/.tsbuildinfo
+coverage
+attached_assets
+images
+vms
+var
