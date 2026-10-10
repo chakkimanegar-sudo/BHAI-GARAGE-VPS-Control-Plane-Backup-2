@@ -1,0 +1,1 @@
+- [GitHub PAT push diagnosis](github-pat-push-auth.md) — REST identity and account rights do not prove a fine-grained PAT can write through Git HTTPS.
