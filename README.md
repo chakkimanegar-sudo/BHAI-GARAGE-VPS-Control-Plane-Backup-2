@@ -80,6 +80,16 @@ Real provisioning requires a Linux machine you control or rent, with hardware vi
    node --experimental-strip-types packages/host-agent/src/index.ts
    ```
 
+   **Startup preflight runs before the first heartbeat.** The host will not appear online until all checks pass:
+   - The configured local libvirt connection answers through `qemu:///system`.
+   - The host exposes `x86_64` KVM acceleration and the selected libvirt network is active.
+   - The VM storage directory is writable by the agent service account.
+   - At least one configured image is a readable QCOW2 file located inside `BHAI_IMAGE_DIRECTORY`, and `cloud-localds` is installed.
+
+   To diagnose a host that never becomes online, inspect its service/container logs for `preflight-started`, `preflight-passed`, or `startup-failed`. Fix the specific missing dependency or permission, then restart the agent. Do not switch `BHAI_PROVISIONER=libvirt` until the host reports a fresh successful heartbeat.
+
+   **Operation recovery and uncertain state:** an operation that reaches the retry limit without a completion response is marked `failed`, and an `agent.operation.exhausted` audit event records its action, attempt count, and last recorded state. This deliberately avoids guessing whether a VM action completed before the response was lost. Before retrying or deleting that VPS, inspect its domain with `virsh --connect qemu:///system list --all` and reconcile the actual VM and disk state manually.
+
    For a local Docker Compose KVM host, save the one-time token in `.env`, set the image map to container paths under `/var/lib/bhai-garage/images`, set `LIBVIRT_GID` to the host socket's actual group ID, set `BHAI_HOSTNAME` to the physical host's name, and run `docker compose --profile libvirt up -d --build host-agent`. The agent uses host networking for accurate interface metrics and reaches the API through a loopback-only port. It mounts the libvirt socket, read-only images, and configured VM data directory; it does not mount the Docker socket or host root.
 6. Wait for a fresh heartbeat, switch `BHAI_PROVISIONER=libvirt`, and restart the API. Create real VPS instances with a valid SSH public key. Requests are queued and only the host assigned to that token can claim them.
 
