@@ -267,10 +267,10 @@ function VpsPage() {
           <div className="form-field full"><label htmlFor="ssh-key">SSH public key <span className="helper">{liveProvisioning ? '(required for real provisioning)' : '(optional in simulation)'}</span></label><textarea id="ssh-key" className="field" name="sshPublicKey" required={liveProvisioning} maxLength={8192} rows={3} placeholder="ssh-ed25519 AAAA… operator@device" style={{ resize: 'vertical' }} /></div>
           {liveProvisioning && <>
             <div className="form-field full"><strong>Public guest networking (optional)</strong><span className="helper">Leave these fields blank for the default NAT/DHCP network. Only enter IPs and a virtual MAC that your server provider has explicitly assigned to this host.</span></div>
-            <div className="form-field"><label htmlFor="public-ip-address">Assigned public IPv4</label><input id="public-ip-address" className="field" name="publicIpAddress" inputMode="decimal" placeholder="203.0.113.10" /></div>
+            <div className="form-field"><label htmlFor="public-ip-address">Assigned public IPv4</label><input id="public-ip-address" className="field" name="publicIpAddress" inputMode="decimal" placeholder="Provider-assigned IPv4" /></div>
             <div className="form-field"><label htmlFor="public-prefix-length">IPv4 prefix length</label><input id="public-prefix-length" className="field" name="publicPrefixLength" type="number" min="1" max="32" placeholder="32" /></div>
             <div className="form-field"><label htmlFor="public-gateway">Provider gateway IPv4</label><input id="public-gateway" className="field" name="publicGateway" inputMode="decimal" placeholder="Provider-supplied gateway" /></div>
-            <div className="form-field"><label htmlFor="public-mac-address">Provider virtual MAC</label><input id="public-mac-address" className="field" name="publicMacAddress" placeholder="02:00:00:00:00:01" /></div>
+            <div className="form-field"><label htmlFor="public-mac-address">Provider virtual MAC</label><input id="public-mac-address" className="field" name="publicMacAddress" placeholder="Provider-issued virtual MAC" /></div>
             <div className="form-field full"><label htmlFor="public-nameservers">DNS IPv4 addresses</label><input id="public-nameservers" className="field" name="publicNameservers" placeholder="1.1.1.1, 8.8.8.8" /><span className="helper">If the IP or virtual MAC is not assigned by your provider, do not guess it. Public bridge mode also requires a configured host bridge.</span></div>
           </>}
         </div>
