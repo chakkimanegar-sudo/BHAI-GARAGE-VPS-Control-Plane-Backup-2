@@ -84,11 +84,11 @@ jobs:
             : volume.target);
           if (agent?.environment?.BHAI_IMAGE_DIRECTORY !== process.env.BHAI_IMAGE_DIR ||
               !mountTargets.includes(process.env.BHAI_IMAGE_DIR)) {
-            throw new Error("Host-agent image root must match its image mount destination exactly");
+            throw new Error("Host-agent image path mismatch: " + JSON.stringify({expected: process.env.BHAI_IMAGE_DIR, configured: agent?.environment?.BHAI_IMAGE_DIRECTORY, mountTargets, volumes}));
           }
           if (agent?.environment?.BHAI_VM_STORAGE !== process.env.BHAI_VM_DIR ||
               !mountTargets.includes(process.env.BHAI_VM_DIR)) {
-            throw new Error("Host-agent VM storage must match its VM mount destination exactly");
+            throw new Error("Host-agent VM path mismatch: " + JSON.stringify({expected: process.env.BHAI_VM_DIR, configured: agent?.environment?.BHAI_VM_STORAGE, mountTargets, volumes}));
           }
           console.log("Web/API are loopback-only; PostgreSQL is private; KVM image and VM paths match their mounts.");
           NODE
