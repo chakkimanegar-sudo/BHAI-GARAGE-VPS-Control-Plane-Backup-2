@@ -1,26 +1,13 @@
-export type RecoverableVpsStatus = "running" | "stopped" | "failed";
+export type RecoverableVpsStatus = "failed";
 
 /**
- * Decide the safe inventory state after a host operation exhausts its retries.
- * A create request cannot assume that a VM exists; other lifecycle actions revert
- * to the state recorded when they were queued.
+ * If a host reaches the retry limit without returning a completion result, the
+ * actual VM state is unknown: the command may have run before the response was
+ * lost. Never claim the last requested/known status is still true.
  */
 export function exhaustedOperationStatus(
-  action: string,
-  payload: Record<string, unknown> | null,
+  _action: string,
+  _payload: Record<string, unknown> | null,
 ): RecoverableVpsStatus {
-  if (action === "create") return "failed";
-  if (action !== "start" && action !== "stop" && action !== "restart" && action !== "delete") {
-    return "failed";
-  }
-
-  const previousStatus = payload?.previousStatus;
-  if (
-    previousStatus === "running" ||
-    previousStatus === "stopped" ||
-    previousStatus === "failed"
-  ) {
-    return previousStatus;
-  }
   return "failed";
 }
