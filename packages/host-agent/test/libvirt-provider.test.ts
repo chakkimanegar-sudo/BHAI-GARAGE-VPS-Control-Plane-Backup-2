@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { LibvirtProvider } from "../src/libvirt-provider.ts";
+import { HostMetricsCollector } from "../src/metrics.ts";
 import type { AgentConfig } from "../src/config.ts";
 import type { AgentOperation } from "../src/types.ts";
 
@@ -76,6 +77,7 @@ test("libvirt outages and unconfirmed rollback preserve VPS storage", async () =
     // A libvirt connection error must not be interpreted as "domain absent".
     await executable(path.join(bin, "virsh"), "#!/bin/sh\nexit 1\n");
     const provider = new LibvirtProvider(config);
+    assert.ok(new HostMetricsCollector(config));
     await assert.rejects(provider.execute(operation("delete")));
     assert.equal(await readFile(disk, "utf8"), "keep this VPS disk");
 
