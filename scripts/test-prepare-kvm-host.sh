@@ -19,6 +19,7 @@ OS_RELEASE
 printf 'processor flags : fpu vmx sse sse2\n' > "$test_root/proc/cpuinfo"
 : > "$test_root/dev/kvm"
 printf 'mock qcow2 image\n' > "$image_dir/noble-server-cloudimg-amd64.img"
+sha256sum "$image_dir/noble-server-cloudimg-amd64.img" > "$image_dir/noble-server-cloudimg-amd64.img.sha256"
 
 cat > "$fake_bin/virsh" <<'FAKE_VIRSH'
 #!/usr/bin/env bash
@@ -65,6 +66,25 @@ grep -Fq 'PASS: Ubuntu 24.04 x86_64 host exposes CPU virtualization and /dev/kvm
 grep -Fq 'PASS: libvirt KVM guest support and active default NAT network verified.' <<<"$check_output"
 grep -Fq 'PASS: KVM host preflight passed.' <<<"$check_output"
 grep -Fq 'does not assign public IPs to guests' <<<"$check_output"
+
+# Host readiness must fail closed if the cached base image is modified.
+cp "$image_dir/noble-server-cloudimg-amd64.img" "$temporary_root/original-image"
+printf 'tampered image\n' > "$image_dir/noble-server-cloudimg-amd64.img"
+if bash "$root/scripts/prepare-kvm-host.sh" --check >"$temporary_root/bad-checksum.out" 2>&1; then
+  echo "Host preflight unexpectedly accepted a tampered cloud image." >&2
+  exit 1
+fi
+grep -Fq 'Cloud image checksum verification failed' "$temporary_root/bad-checksum.out"
+mv "$temporary_root/original-image" "$image_dir/noble-server-cloudimg-amd64.img"
+
+# An image without its trusted checksum record must not be accepted as ready.
+mv "$image_dir/noble-server-cloudimg-amd64.img.sha256" "$temporary_root/original-image.sha256"
+if bash "$root/scripts/prepare-kvm-host.sh" --check >"$temporary_root/no-checksum.out" 2>&1; then
+  echo "Host preflight unexpectedly accepted an image with no checksum record." >&2
+  exit 1
+fi
+grep -Fq 'Trusted cloud-image checksum record missing or unsafe' "$temporary_root/no-checksum.out"
+mv "$temporary_root/original-image.sha256" "$image_dir/noble-server-cloudimg-amd64.img.sha256"
 
 # A host without an exposed KVM device must fail preflight, not report ready.
 rm "$test_root/dev/kvm"
