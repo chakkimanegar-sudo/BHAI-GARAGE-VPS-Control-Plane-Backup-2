@@ -85,5 +85,25 @@ services:
       api:
         condition: service_healthy
 
+  caddy:
+    profiles: ["public"]
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      BHAI_DOMAIN: ${BHAI_DOMAIN:?Set BHAI_DOMAIN to a real domain whose DNS points to this host}
+    ports:
+      - "80:80/tcp"
+      - "443:443/tcp"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web:
+        condition: service_started
+
 volumes:
   postgres_data:
+  caddy_data:
+  caddy_config:
