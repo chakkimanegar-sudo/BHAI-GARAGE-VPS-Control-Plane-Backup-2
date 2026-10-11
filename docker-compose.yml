@@ -54,7 +54,7 @@ services:
       api:
         condition: service_healthy
     ports:
-      - "${BHAI_WEB_PORT:-8080}:80"
+      - "127.0.0.1:${BHAI_WEB_PORT:-8080}:80"
 
   host-agent:
     profiles: ["libvirt"]
