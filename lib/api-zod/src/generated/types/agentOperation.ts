@@ -14,4 +14,14 @@ export interface AgentOperation {
   vps: VpsInstance;
   /** @nullable */
   sshPublicKey?: string | null;
+  /** @nullable */
+  publicNetwork?: {
+    ipAddress: string;
+    /** @minimum 1 @maximum 32 */
+    prefixLength: number;
+    gateway: string;
+    macAddress: string;
+    /** @minItems 1 @maxItems 4 */
+    nameservers: string[];
+  } | null;
 }
