@@ -30,10 +30,15 @@ IMAGE_DIR="${BHAI_IMAGE_DIR:-/var/lib/libvirt/images/bhai-garage-base}"
 VM_DIR="${BHAI_VM_DIR:-/var/lib/libvirt/images/bhai-garage-vms}"
 AGENT_UID="${BHAI_AGENT_UID:-1000}"
 AGENT_GID="${BHAI_AGENT_GID:-1000}"
+QEMU_GID="${BHAI_QEMU_GID:-}"
 IMAGE_FILE="noble-server-cloudimg-amd64.img"
 
 [[ "$AGENT_UID" =~ ^[0-9]+$ && "$AGENT_GID" =~ ^[0-9]+$ ]] ||
   fail "BHAI_AGENT_UID and BHAI_AGENT_GID must be numeric."
+if [[ -z "$QEMU_GID" ]]; then
+  QEMU_GID="$(getent group libvirt-qemu | cut -d: -f3)"
+fi
+[[ "$QEMU_GID" =~ ^[0-9]+$ ]] || fail "Set BHAI_QEMU_GID to the numeric libvirt-qemu group ID."
 
 for tool in virsh qemu-img cloud-localds realpath grep head cut tr xargs seq; do
   command -v "$tool" >/dev/null 2>&1 || fail "Required command is missing: $tool"
@@ -54,9 +59,9 @@ if virsh --connect qemu:///system list --all --name | grep -Fxq "$DOMAIN"; then
 fi
 
 TEMP_DIR="$(mktemp -d "$VM_DIR/.kvm-smoke.XXXXXXXX")"
-# The system libvirt-qemu user must traverse this temporary directory to open the
-# disk and cloud-init ISO. 0711 grants search-only access to non-owners.
-chmod 0711 "$TEMP_DIR"
+# Match production: the setgid folder assigns the libvirt-qemu group to created files.
+chown "$AGENT_UID:$QEMU_GID" "$TEMP_DIR"
+chmod 2710 "$TEMP_DIR"
 disk_path="$TEMP_DIR/root.qcow2"
 seed_path="$TEMP_DIR/cloud-init.iso"
 user_data_path="$TEMP_DIR/user-data"
@@ -107,6 +112,8 @@ chmod 0711 "$TEMP_DIR"
 chown "$AGENT_UID:$AGENT_GID" "$TEMP_DIR"
 
 qemu-img create -f qcow2 -F qcow2 -b "$IMAGE_PATH" "$disk_path" 8G
+chown "$AGENT_UID:$QEMU_GID" "$disk_path"
+chmod 0660 "$disk_path"
 cat > "$user_data_path" <<'USERDATA'
 #cloud-config
 ssh_pwauth: false
@@ -117,7 +124,9 @@ instance-id: $DOMAIN
 local-hostname: $DOMAIN
 METADATA
 cloud-localds "$seed_path" "$user_data_path" "$meta_data_path"
-chmod 0640 "$disk_path" "$seed_path" "$user_data_path" "$meta_data_path"
+chown "$AGENT_UID:$QEMU_GID" "$seed_path"
+chmod 0640 "$seed_path"
+chmod 0600 "$user_data_path" "$meta_data_path"
 
 xml_escape() {
   local value="$1"
