@@ -91,6 +91,8 @@ sudo bash scripts/prepare-kvm-host.sh --check
 
 The install mode requires root and may install packages and activate the libvirt default network. It verifies the Ubuntu cloud image against Canonical's signed SHA-256 manifest and stores a root-owned checksum record. The read-only check mode verifies that record and fails closed if the cached image has changed or its verification record is missing. For hosts prepared by an older version, run `--install` once to validate and record the cached image; if it is not the current signed release, investigate before replacing it, especially when VM disks depend on that base image. The check also fails if the host does not expose CPU virtualization and `/dev/kvm`, if libvirt cannot provide an x86-64 KVM guest, or if storage/network are not ready. It does not create any VM.
 
+After preflight passes, run `sudo bash scripts/smoke-test-kvm-host.sh` on the actual KVM host. This opt-in live test creates a uniquely named temporary 1-vCPU/1-GiB Ubuntu guest on the default private NAT network, waits up to five minutes for a DHCP lease, and then undefines the test guest and removes its temporary files. It does not modify the public interface, firewall rules, or existing VM domains. If cleanup cannot be confirmed, it preserves the temporary files and reports the domain/path for manual recovery. The regular hosted CI checks this command's syntax/help only; it does not pretend to boot a VM without a real host.
+
 For the Compose host-agent, configure the host-side image and VM directories, the image map inside the container, and the numeric group ID of the libvirt socket. Starting values after running the helper are:
 
 ```sh
