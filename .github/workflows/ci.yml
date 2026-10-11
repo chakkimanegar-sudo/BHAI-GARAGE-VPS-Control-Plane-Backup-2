@@ -54,6 +54,12 @@ jobs:
           BASE_PATH: "/"
         run: pnpm run build
 
+      - name: Check backup script syntax
+        run: bash -n scripts/backup-db.sh scripts/restore-db.sh scripts/test-db-backup.sh
+
+      - name: Test backup rotation and restore safety
+        run: bash scripts/test-db-backup.sh
+
       - name: Test host agent
         run: pnpm --filter @workspace/host-agent run test
 
