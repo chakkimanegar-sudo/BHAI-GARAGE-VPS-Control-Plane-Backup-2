@@ -90,7 +90,15 @@ services:
     image: caddy:2-alpine
     restart: unless-stopped
     environment:
-      BHAI_DOMAIN: ${BHAI_DOMAIN:?Set BHAI_DOMAIN to a real domain whose DNS points to this host}
+      BHAI_DOMAIN: ${BHAI_DOMAIN:-}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        if [ -z "$BHAI_DOMAIN" ]; then
+          echo "Set BHAI_DOMAIN to a real public DNS hostname before enabling the public profile." >&2
+          exit 2
+        fi
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
     ports:
       - "80:80/tcp"
       - "443:443/tcp"
