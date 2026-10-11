@@ -60,7 +60,23 @@ jobs:
           SESSION_SECRET: ci-compose-session-secret-741c2bda9034e8fb
           BHAI_SETUP_TOKEN: ci-compose-setup-token-d8203af17c64ab95
           BHAI_AGENT_TOKEN: ci-compose-agent-token-2371fa904cb685de
-        run: docker compose config --quiet
+        run: |
+          docker compose config --quiet
+          docker compose config --format json > "$RUNNER_TEMP/bhai-garage-compose.json"
+          node - "$RUNNER_TEMP/bhai-garage-compose.json" <<'NODE'
+          const fs = require("node:fs");
+          const config = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          for (const service of ["api", "web"]) {
+            const ports = config.services?.[service]?.ports ?? [];
+            if (ports.length === 0 || ports.some((port) => port.host_ip !== "127.0.0.1")) {
+              throw new Error(`${service} published ports must bind only to 127.0.0.1`);
+            }
+          }
+          if ((config.services?.db?.ports ?? []).length > 0) {
+            throw new Error("PostgreSQL must not publish a host port");
+          }
+          console.log("Web/API listeners are loopback-only; PostgreSQL has no published host port.");
+          NODE
 
       - name: Build API, web, and host-agent container images
         env:
