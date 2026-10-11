@@ -96,7 +96,9 @@ verify_image_checksum_record() {
   [[ "$digest" =~ ^[[:xdigit:]]{64}$ && "$recorded_file" == "$image_file" && -z "${extra:-}" ]] ||
     fail "Cloud-image checksum record has an invalid format: $record"
 
-  (cd "$image_dir" && sha256sum --check --status "$record") ||
+  local record_path
+  record_path="$(realpath -- "$record")" || fail "Cannot resolve cloud-image checksum record: $record"
+  (cd "$image_dir" && sha256sum --check --status "$record_path") ||
     fail "Cloud image checksum verification failed: $image_dir/$image_file"
 }
 
