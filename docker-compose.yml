@@ -65,9 +65,11 @@ services:
     user: "${BHAI_AGENT_UID:-1000}:${BHAI_AGENT_GID:-1000}"
     group_add:
       - "${LIBVIRT_GID:-106}"
+      - "${BHAI_QEMU_GID:?Set BHAI_QEMU_GID to the numeric GID of the host libvirt-qemu group}"
     environment:
       BHAI_API_URL: http://127.0.0.1:${BHAI_API_LOCAL_PORT:-5000}/api
       BHAI_AGENT_TOKEN: ${BHAI_AGENT_TOKEN:-}
+      BHAI_QEMU_GID: ${BHAI_QEMU_GID:?Set BHAI_QEMU_GID to the numeric GID of the host libvirt-qemu group}
       BHAI_IMAGES_JSON: "${BHAI_IMAGES_JSON:-}"
       BHAI_IMAGE_DIRECTORY: ${BHAI_IMAGE_DIR:-/var/lib/libvirt/images/bhai-garage-base}
       BHAI_VM_STORAGE: ${BHAI_VM_DIR:-/var/lib/libvirt/images/bhai-garage-vms}

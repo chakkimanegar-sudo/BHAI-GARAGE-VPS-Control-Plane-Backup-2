@@ -7,6 +7,7 @@ export interface AgentConfig {
   hostname: string | null;
   imageDirectory: string;
   storageDirectory: string;
+  qemuGid: number;
   libvirtUri: string;
   libvirtNetwork: string;
   libvirtBridge?: string | null;
@@ -62,6 +63,12 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
   if (!Number.isInteger(pollMs) || pollMs < 2000 || pollMs > 60_000) {
     throw new Error("BHAI_AGENT_POLL_MS must be between 2000 and 60000");
   }
+  const qemuGidRaw = env.BHAI_QEMU_GID;
+  if (!qemuGidRaw || !/^\d+$/.test(qemuGidRaw) || !Number.isSafeInteger(Number(qemuGidRaw))) {
+    throw new Error("BHAI_QEMU_GID must be set to the numeric GID of the host libvirt-qemu group");
+  }
+  const qemuGid = Number(qemuGidRaw);
+
   const libvirtNetwork = env.BHAI_LIBVIRT_NETWORK ?? "default";
   if (!/^[A-Za-z0-9_.-]{1,64}$/.test(libvirtNetwork)) {
     throw new Error("BHAI_LIBVIRT_NETWORK contains unsupported characters");
@@ -87,6 +94,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
     hostname,
     imageDirectory: path.resolve(env.BHAI_IMAGE_DIRECTORY ?? "/var/lib/libvirt/images/bhai-garage-base"),
     storageDirectory: path.resolve(env.BHAI_VM_STORAGE ?? "/var/lib/libvirt/images/bhai-garage-vms"),
+    qemuGid,
     libvirtUri,
     libvirtNetwork,
     libvirtBridge,

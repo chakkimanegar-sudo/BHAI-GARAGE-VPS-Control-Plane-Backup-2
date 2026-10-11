@@ -1,5 +1,5 @@
 import { execFile as execFileCallback } from "node:child_process";
-import { access, chmod, mkdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { access, chmod, lstat, mkdir, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -151,6 +151,32 @@ export class LibvirtProvider implements VirtualizationProvider {
     }
 
     await access(this.config.storageDirectory, fsConstants.W_OK);
+    const storage = await stat(this.config.storageDirectory);
+    const agentUid = typeof process.getuid === "function" ? process.getuid() : storage.uid;
+    if (!storage.isDirectory() || storage.uid !== agentUid) {
+      throw new Error("VM storage must be a real directory owned by the host-agent UID");
+    }
+    const storageMode = storage.mode & 0o7777;
+    if (storage.gid !== this.config.qemuGid || (storageMode & 0o2010) !== 0o2010) {
+      throw new Error("VM storage must inherit the libvirt-qemu GID and have setgid + group-search permissions (2710); run prepare-kvm-host.sh --install");
+    }
+    const groups = new Set([
+      ...(typeof process.getgroups === "function" ? process.getgroups() : []),
+      ...(typeof process.getgid === "function" ? [process.getgid()] : []),
+    ]);
+    if (!groups.has(this.config.qemuGid)) {
+      throw new Error("Host-agent lacks the libvirt-qemu supplementary group; set BHAI_QEMU_GID and recreate the host-agent container");
+    }
+    for (const entry of await readdir(this.config.storageDirectory, { withFileTypes: true })) {
+      if (!entry.name.startsWith("bg-")) continue;
+      const guestPath = path.join(this.config.storageDirectory, entry.name);
+      const guest = await lstat(guestPath);
+      const guestMode = guest.mode & 0o7777;
+      if (!guest.isDirectory() || guest.uid !== agentUid || guest.gid !== this.config.qemuGid ||
+          (guestMode & 0o2010) !== 0o2010) {
+        throw new Error("Existing VPS directory has unsafe QEMU storage permissions: " + entry.name + "; run prepare-kvm-host.sh --install");
+      }
+    }
     const uri = (await this.virsh(["uri"], 10_000)).trim();
     if (uri !== this.config.libvirtUri) {
       throw new Error("The configured local libvirt connection is not available");
@@ -347,17 +373,18 @@ export class LibvirtProvider implements VirtualizationProvider {
     const seedPath = path.join(instanceDirectory, "cloud-init.iso");
     const userDataPath = path.join(instanceDirectory, "user-data");
     const metaDataPath = path.join(instanceDirectory, "meta-data");
-    await mkdir(instanceDirectory, { recursive: true, mode: 0o711 });
-      // System QEMU runs as libvirt-qemu, not as the host-agent UID. Grant only
-      // search/traverse access so QEMU can reach the exact disk path; do not
-      // grant other users permission to list or write this customer's directory.
-      await chmod(instanceDirectory, 0o711);
+    await mkdir(instanceDirectory, { recursive: true, mode: 0o2710 });
+    // The setgid parent makes new guest files inherit libvirt-qemu's group.
+    // QEMU can traverse its folder without listing or writing another guest's folder.
+    await chmod(instanceDirectory, 0o2710);
 
     try {
       await command("qemu-img", [
         "create", "-f", "qcow2", "-F", "qcow2", "-b", resolvedBaseImage,
         diskPath, `${vps.diskGb}G`,
       ], 120_000);
+      // System QEMU needs group read/write on the mutable overlay, not world write.
+      await chmod(diskPath, 0o660);
       await writeFile(userDataPath, [
         "#cloud-config",
         "ssh_pwauth: false",
@@ -380,6 +407,8 @@ export class LibvirtProvider implements VirtualizationProvider {
         cloudLocalDsArgs = [seedPath, userDataPath, metaDataPath];
       }
       await command("cloud-localds", cloudLocalDsArgs, 30_000);
+      // QEMU reads the seed ISO but never writes to it.
+      await chmod(seedPath, 0o640);
 
       const networkInterfaceXml = publicNetwork
         ? renderBridgeInterfaceXml(this.config.libvirtBridge!, publicNetwork.macAddress)
