@@ -54,6 +54,9 @@ if virsh --connect qemu:///system list --all --name | grep -Fxq "$DOMAIN"; then
 fi
 
 TEMP_DIR="$(mktemp -d "$VM_DIR/.kvm-smoke.XXXXXXXX")"
+# The system libvirt-qemu user must traverse this temporary directory to open the
+# disk and cloud-init ISO. 0711 grants search-only access to non-owners.
+chmod 0711 "$TEMP_DIR"
 disk_path="$TEMP_DIR/root.qcow2"
 seed_path="$TEMP_DIR/cloud-init.iso"
 user_data_path="$TEMP_DIR/user-data"
