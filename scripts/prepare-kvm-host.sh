@@ -67,6 +67,15 @@ pass() {
   printf 'PASS: %s\n' "$*"
 }
 
+resolve_qemu_gid() {
+  local gid="${BHAI_QEMU_GID:-}"
+  if [[ -z "$gid" ]]; then
+    gid="$(getent group libvirt-qemu | cut -d: -f3)"
+  fi
+  [[ "$gid" =~ ^[0-9]+$ ]] || fail "Unable to resolve numeric libvirt-qemu GID; set BHAI_QEMU_GID."
+  printf '%s' "$gid"
+}
+
 fetch_verified_manifest() {
   local temp_dir="$1"
   for file in SHA256SUMS SHA256SUMS.gpg; do
@@ -115,6 +124,7 @@ IMAGE_DIR="${BHAI_IMAGE_DIR:-/var/lib/libvirt/images/bhai-garage-base}"
 VM_DIR="${BHAI_VM_DIR:-/var/lib/libvirt/images/bhai-garage-vms}"
 AGENT_UID="${BHAI_AGENT_UID:-1000}"
 AGENT_GID="${BHAI_AGENT_GID:-1000}"
+QEMU_GID="${BHAI_QEMU_GID:-}"
 OS_RELEASE="$(host_path /etc/os-release)"
 CPU_INFO="$(host_path /proc/cpuinfo)"
 KVM_DEVICE="$(host_path /dev/kvm)"
@@ -169,6 +179,7 @@ if [[ "$MODE" == "install" ]]; then
     ca-certificates curl gpgv ubuntu-keyring ubuntu-cloudimage-keyring \
     qemu-kvm libvirt-daemon-system libvirt-clients qemu-utils cloud-image-utils
 
+  QEMU_GID="$(resolve_qemu_gid)"
   systemctl enable --now libvirtd
 
   if ! virsh --connect qemu:///system net-list --all --name | grep -Fxq default; then
@@ -181,23 +192,43 @@ if [[ "$MODE" == "install" ]]; then
   fi
   virsh --connect qemu:///system net-autostart default
 
+  QEMU_GID="$(resolve_qemu_gid)"
   install -d -o root -g root -m 0755 "$IMAGE_DIR"
   if [[ -e "$VM_DIR" ]]; then
-    [[ -d "$VM_DIR" ]] || fail "VM storage path exists but is not a directory: $VM_DIR"
+    [[ -d "$VM_DIR" && ! -L "$VM_DIR" ]] || fail "VM storage path must be a real directory, not a symlink: $VM_DIR"
     existing_entries="$(find "$VM_DIR" -mindepth 1 -maxdepth 1 -print -quit)"
     existing_owner="$(stat -c %u "$VM_DIR")"
     if [[ -n "$existing_entries" && "$existing_owner" != "$AGENT_UID" ]]; then
       fail "Existing VM storage is non-empty and owned by another UID. Refusing to change ownership automatically: $VM_DIR"
     fi
   fi
-  install -d -o "$AGENT_UID" -g "$AGENT_GID" -m 0711 "$VM_DIR"
-  # Existing managed instance directories may have been created with 0750.
-  # Add only the search bit needed by libvirt-qemu; do not change guest files.
+  install -d -o "$AGENT_UID" -g "$QEMU_GID" -m 2710 "$VM_DIR"
+  chown "$AGENT_UID:$QEMU_GID" "$VM_DIR"
+  chmod 2710 "$VM_DIR"
+
+  # Repair metadata on managed guests only; disk contents are not rewritten.
   while IFS= read -r -d '' instance_dir; do
+    [[ ! -L "$instance_dir" && -d "$instance_dir" ]] ||
+      fail "Managed VPS path is not a real directory: $instance_dir"
     instance_owner="$(stat -c '%u' "$instance_dir")"
     [[ "$instance_owner" == "$AGENT_UID" ]] ||
-      fail "Managed VM directory is not owned by UID $AGENT_UID; refusing to chmod it: $instance_dir"
-    chmod o+x "$instance_dir"
+      fail "Managed VPS directory is not owned by UID $AGENT_UID; refusing automatic repair: $instance_dir"
+    chown "$AGENT_UID:$QEMU_GID" "$instance_dir"
+    chmod 2710 "$instance_dir"
+    disk_path="$instance_dir/root.qcow2"
+    if [[ -e "$disk_path" ]]; then
+      [[ -f "$disk_path" && ! -L "$disk_path" ]] ||
+        fail "Managed VPS disk is not a regular file; refusing permission change: $disk_path"
+      chown "$AGENT_UID:$QEMU_GID" "$disk_path"
+      chmod 0660 "$disk_path"
+    fi
+    seed_path="$instance_dir/cloud-init.iso"
+    if [[ -e "$seed_path" ]]; then
+      [[ -f "$seed_path" && ! -L "$seed_path" ]] ||
+        fail "Managed cloud-init ISO is not a regular file: $seed_path"
+      chown "$AGENT_UID:$QEMU_GID" "$seed_path"
+      chmod 0640 "$seed_path"
+    fi
   done < <(find "$VM_DIR" -mindepth 1 -maxdepth 1 -type d -name 'bg-*' -print0)
 
   IMAGE_PATH="$IMAGE_DIR/$IMAGE_FILE"
@@ -241,9 +272,10 @@ if [[ "$MODE" == "install" ]]; then
   pass "libvirt packages, default NAT network, storage, and signed Ubuntu image prepared."
 fi
 
-for tool in virsh qemu-img cloud-localds; do
+for tool in virsh qemu-img cloud-localds getent; do
   command -v "$tool" >/dev/null 2>&1 || fail "Required command is missing: $tool (run --install)."
 done
+QEMU_GID="$(resolve_qemu_gid)"
 
 virsh_uri="$(virsh --connect qemu:///system uri)" ||
   fail "Cannot connect to the local qemu:///system libvirt instance."
@@ -287,26 +319,44 @@ vm_dir_real="$(realpath -e -- "$VM_PATH")"
 [[ "$vm_dir_real" == "$libvirt_root_real/"* ]] ||
   fail "VM storage resolves outside libvirt's standard image root: $VM_DIR"
 vm_owner="$(stat -c '%u' "$VM_PATH")"
+vm_group="$(stat -c '%g' "$VM_PATH")"
+vm_mode="$(stat -c '%a' "$VM_PATH")"
 [[ "$vm_owner" == "$AGENT_UID" ]] ||
   fail "VM storage owner UID is $vm_owner; Docker host-agent runs as UID $AGENT_UID. Run --install or fix ownership."
-vm_mode="$(stat -c '%a' "$VM_PATH")"
-vm_other_exec="${vm_mode: -1}"
-[[ "$vm_other_exec" =~ [1357] ]] ||
-  fail "VM storage must grant search-only access to libvirt-qemu (missing other execute bit): $VM_PATH. Run --install."
-# Existing VM directories also need traverse permission; the installer repairs
-# only the directory search bit without changing data files.
+[[ "$vm_group" == "$QEMU_GID" && "$vm_mode" == "2710" ]] ||
+  fail "VM storage must be owned by agent UID $AGENT_UID, group libvirt-qemu GID $QEMU_GID, and mode 2710. Run --install."
 while IFS= read -r -d '' instance_dir; do
+  [[ ! -L "$instance_dir" && -d "$instance_dir" ]] ||
+    fail "Managed VPS path must be a real directory: $instance_dir"
+  instance_owner="$(stat -c '%u' "$instance_dir")"
+  instance_group="$(stat -c '%g' "$instance_dir")"
   instance_mode="$(stat -c '%a' "$instance_dir")"
-  instance_other_exec="${instance_mode: -1}"
-  [[ "$instance_other_exec" =~ [1357] ]] ||
-    fail "Existing VM directory is not searchable by libvirt-qemu: $instance_dir. Run --install to repair it."
+  [[ "$instance_owner" == "$AGENT_UID" && "$instance_group" == "$QEMU_GID" && "$instance_mode" == "2710" ]] ||
+    fail "Existing VPS directory must use agent UID $AGENT_UID, QEMU GID $QEMU_GID, mode 2710: $instance_dir. Run --install."
+  if [[ -e "$instance_dir/root.qcow2" ]]; then
+    [[ -f "$instance_dir/root.qcow2" && ! -L "$instance_dir/root.qcow2" ]] ||
+      fail "Managed VPS disk must be a regular file: $instance_dir/root.qcow2"
+    disk_mode="$(stat -c '%a' "$instance_dir/root.qcow2")"
+    disk_group="$(stat -c '%g' "$instance_dir/root.qcow2")"
+    [[ "$disk_group" == "$QEMU_GID" && "$disk_mode" == "660" ]] ||
+      fail "Managed VPS disk must use QEMU GID $QEMU_GID and mode 660: $instance_dir/root.qcow2. Run --install."
+  fi
+  if [[ -e "$instance_dir/cloud-init.iso" ]]; then
+    [[ -f "$instance_dir/cloud-init.iso" && ! -L "$instance_dir/cloud-init.iso" ]] ||
+      fail "Managed cloud-init ISO must be a regular file: $instance_dir/cloud-init.iso"
+    seed_mode="$(stat -c '%a' "$instance_dir/cloud-init.iso")"
+    seed_group="$(stat -c '%g' "$instance_dir/cloud-init.iso")"
+    [[ "$seed_group" == "$QEMU_GID" && "$seed_mode" == "640" ]] ||
+      fail "Managed cloud-init ISO must use QEMU GID $QEMU_GID and mode 640: $instance_dir/cloud-init.iso. Run --install."
+  fi
 done < <(find "$VM_PATH" -mindepth 1 -maxdepth 1 -type d -name 'bg-*' -print0)
-pass "Ubuntu QCOW2 image integrity and writable VM storage verified."
+pass "Ubuntu QCOW2 integrity, QEMU group membership, and writable guest-disk permissions verified."
 pass "cloud-localds is available for cloud-init SSH-key provisioning."
 
 note "For Compose, map BHAI_IMAGE_DIR=$IMAGE_DIR and BHAI_VM_DIR=$VM_DIR."
 note "Set BHAI_IMAGES_JSON to {\"ubuntu-24.04\":\"$IMAGE_DIR/$IMAGE_FILE\"}."
 note "Set LIBVIRT_GID to the numeric group ID of the host's libvirt socket."
+note "Set BHAI_QEMU_GID=$QEMU_GID (libvirt-qemu numeric GID) for guest disk read/write access."
 note "This prepares guest outbound NAT only. It does not assign public IPs to guests or change firewall rules."
 note "Before customer hosting, choose a provider-specific routed IP/bridge or an explicitly documented port-forwarding plan, then restrict SSH/API/guest ingress with the provider and host firewall."
 pass "KVM host preflight passed. This verifies host prerequisites; it does not create a VPS."
