@@ -11,6 +11,7 @@ import {
 import { db, agentOperations, auditEvents, hosts, vpsInstances } from "@workspace/db";
 import { requireHostAgent } from "../middlewares/auth";
 import { serializeVps } from "../lib/vps";
+import { exhaustedOperationStatus } from "../lib/operation-recovery";
 
 const router: IRouter = Router();
 
@@ -58,13 +59,7 @@ router.post("/agent/operations/next", requireHostAgent, async (_req, res): Promi
       payload: Record<string, unknown> | null;
       attempts: number;
     }>) {
-      const previousStatusValue = row.payload?.previousStatus;
-      const previousStatus: "running" | "stopped" | "failed" =
-        previousStatusValue === "running" || previousStatusValue === "stopped" || previousStatusValue === "failed"
-          ? previousStatusValue
-          : "failed";
-      const status: "running" | "stopped" | "failed" =
-        row.action === "create" ? "failed" : previousStatus;
+      const status = exhaustedOperationStatus(row.action, row.payload);
       if (row.vps_id) {
         await tx.update(vpsInstances)
           .set({ status, updatedAt: new Date() })
