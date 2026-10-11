@@ -10,6 +10,9 @@ export function exhaustedOperationStatus(
   payload: Record<string, unknown> | null,
 ): RecoverableVpsStatus {
   if (action === "create") return "failed";
+  if (action !== "start" && action !== "stop" && action !== "restart" && action !== "delete") {
+    return "failed";
+  }
 
   const previousStatus = payload?.previousStatus;
   if (
