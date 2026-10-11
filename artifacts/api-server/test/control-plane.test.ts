@@ -187,6 +187,8 @@ test("provider-assigned public network persists and reaches a claimed real-host 
   };
   let hostId: string | null = null;
   let publicVpsId: string | null = null;
+  let reservedVpsId: string | null = null;
+  const extraVpsIds: string[] = [];
 
   process.env.BHAI_PROVISIONER = "libvirt";
   try {
@@ -223,6 +225,20 @@ test("provider-assigned public network persists and reaches a claimed real-host 
       }),
     });
     assert.equal(heartbeat.status, 200);
+
+    // A stopped guest still reserves its configured resources; its VM may be
+    // started again and its disk can grow to the declared capacity.
+    const [reserved] = await db.insert(vpsInstances).values({
+      name: `stopped-reservation-${randomUUID().slice(0, 8)}`,
+      hostId,
+      osImage: "ubuntu-24.04",
+      vcpus: 1,
+      memoryMb: 24576,
+      diskGb: 360,
+      status: "stopped",
+      provider: "libvirt",
+    }).returning({ id: vpsInstances.id });
+    reservedVpsId = reserved.id;
 
     const created = await fetch(`${apiBase}/vps`, {
       method: "POST",
@@ -271,6 +287,44 @@ test("provider-assigned public network persists and reaches a claimed real-host 
     });
     assert.equal(duplicateIp.status, 409);
 
+    // Both requests individually fit the five-GB remainder, but only one may
+    // reserve it. The per-host database lock must serialize capacity checks.
+    const concurrentResponses = await Promise.all([
+      fetch(`${apiBase}/vps`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({
+          name: `race-a-${randomUUID().slice(0, 8)}`,
+          osImage: "ubuntu-24.04",
+          vcpus: 1,
+          memoryMb: 512,
+          diskGb: 25,
+          hostId,
+          sshPublicKey: "ssh-ed25519 AAAA ci-test",
+        }),
+      }),
+      fetch(`${apiBase}/vps`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({
+          name: `race-b-${randomUUID().slice(0, 8)}`,
+          osImage: "ubuntu-24.04",
+          vcpus: 1,
+          memoryMb: 512,
+          diskGb: 25,
+          hostId,
+          sshPublicKey: "ssh-ed25519 AAAA ci-test",
+        }),
+      }),
+    ]);
+    assert.deepEqual(concurrentResponses.map((response) => response.status).sort(), [201, 409]);
+    for (const response of concurrentResponses) {
+      if (response.status === 201) {
+        const body = await response.json() as { vps: { id: string } };
+        extraVpsIds.push(body.vps.id);
+      }
+    }
+
     const claim = await fetch(`${apiBase}/agent/operations/next`, {
       method: "POST",
       headers: { authorization: `Bearer ${agentToken}` },
@@ -289,9 +343,9 @@ test("provider-assigned public network persists and reaches a claimed real-host 
     if (hostId) {
       await db.delete(agentOperations).where(eq(agentOperations.hostId, hostId));
     }
-    if (publicVpsId) {
-      await db.delete(vpsInstances).where(eq(vpsInstances.id, publicVpsId));
-      await db.delete(auditEvents).where(eq(auditEvents.resourceId, publicVpsId));
+    for (const vpsId of [publicVpsId, reservedVpsId, ...extraVpsIds].filter((id): id is string => Boolean(id))) {
+      await db.delete(auditEvents).where(eq(auditEvents.resourceId, vpsId));
+      await db.delete(vpsInstances).where(eq(vpsInstances.id, vpsId));
     }
     if (hostId) {
       await db.delete(auditEvents).where(eq(auditEvents.resourceId, hostId));
