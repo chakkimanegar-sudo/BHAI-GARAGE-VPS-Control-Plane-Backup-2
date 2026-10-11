@@ -1,3 +1,4 @@
+import app from "../src/app.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { checkRateLimit } from "../src/lib/security.ts";
@@ -26,4 +27,8 @@ test("rate limit storage refuses new buckets at its capacity", () => {
     }
   }
   assert.equal(denied, true, "new keys must be rejected rather than growing the map without bound");
+});
+
+test("API trusts exactly one reverse-proxy hop for forwarded client metadata", () => {
+  assert.equal(app.get("trust proxy"), 1);
 });

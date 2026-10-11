@@ -1,0 +1,12 @@
+{$BHAI_DOMAIN} {
+    encode zstd gzip
+
+    header {
+        -Server
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+    }
+
+    reverse_proxy web:80
+}

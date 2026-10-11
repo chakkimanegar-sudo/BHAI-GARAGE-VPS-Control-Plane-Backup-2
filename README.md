@@ -35,7 +35,13 @@ docker compose up -d --build
 
 Open `http://localhost:8080`. The first-admin setup screen requires the exact `BHAI_SETUP_TOKEN` from `.env`; setup can only succeed once. Use a password of at least 12 characters. The dashboard starts in simulation mode and clearly identifies simulated hosts, metrics, addresses, and lifecycle actions.
 
-For an externally reachable deployment, put the web service behind a maintained TLS reverse proxy, restrict database and host-agent access to private networks, use strong unique secrets, and keep operating-system and container images updated. The included Nginx service is an internal HTTP frontend, not a public TLS terminator.
+The default Compose setup keeps API and web host ports bound to loopback and has no public listener. For a public dashboard, point your real DNS hostname at the server, ensure inbound TCP 80/443 reaches it (UDP 443 is optional for HTTP/3), set `BHAI_DOMAIN` in `.env`, then start the optional Caddy TLS edge:
+
+```sh
+docker compose --profile public up -d --build
+```
+
+Caddy requests and renews HTTPS certificates automatically. It is only enabled by the explicit `public` profile; do not expose API or PostgreSQL ports directly. The internal Nginx frontend preserves the original Host and forwarded client/protocol headers so the API's same-origin guard and IP-based rate limits work behind Caddy. For a real KVM host, combine `--profile public` with `--profile libvirt` only after configuring the server, agent token, libvirt socket/QEMU group IDs, and storage paths. Use strong unique secrets and keep OS/container images updated.
 
 ### Health endpoints
 

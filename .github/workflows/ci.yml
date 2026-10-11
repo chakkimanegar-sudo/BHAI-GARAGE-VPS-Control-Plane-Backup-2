@@ -63,9 +63,12 @@ jobs:
           BHAI_QEMU_GID: "640"
           BHAI_IMAGE_DIR: /var/lib/libvirt/images/ci-bhai-garage-images
           BHAI_VM_DIR: /var/lib/libvirt/images/ci-bhai-garage-vms
+          BHAI_DOMAIN: garage-ci.example.test
         run: |
-          docker compose --profile libvirt config --quiet
-          docker compose --profile libvirt config --format json > "$RUNNER_TEMP/bhai-garage-compose.json"
+          docker compose --profile libvirt --profile public config --quiet
+          docker compose --profile libvirt --profile public config --format json > "$RUNNER_TEMP/bhai-garage-compose.json"
+          env -u BHAI_DOMAIN docker compose config --quiet
+          docker run --rm -e BHAI_DOMAIN=garage-ci.example.test -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
           node - "$RUNNER_TEMP/bhai-garage-compose.json" <<'NODE'
           const fs = require("node:fs");
           const config = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
@@ -77,6 +80,13 @@ jobs:
           }
           if ((config.services?.db?.ports ?? []).length > 0) {
             throw new Error("PostgreSQL must not publish a host port");
+          }
+          const edge = config.services?.caddy;
+          const edgePorts = edge?.ports ?? [];
+          for (const [published, target, protocol] of [["80", 80, "tcp"], ["443", 443, "tcp"], ["443", 443, "udp"]]) {
+            if (!edgePorts.some((port) => String(port.published) === published && port.target === target && port.protocol === protocol)) {
+              throw new Error("Public Caddy edge is missing required HTTP/HTTPS port " + published + "/" + protocol);
+            }
           }
           const agent = config.services?.["host-agent"];
           const volumes = agent?.volumes ?? [];
@@ -154,7 +164,9 @@ jobs:
 
           curl --fail --silent --show-error http://127.0.0.1:8080/healthz
           curl --fail --silent --show-error http://127.0.0.1:8080/readyz
-          echo "Docker Compose web, API liveness, and database readiness smoke checks passed."
+          # Same-origin POST must survive the reverse proxy with Host's port intact.
+          curl --fail --silent --show-error -X POST -H 'Origin: http://127.0.0.1:8080' -H 'sec-fetch-site: same-origin' http://127.0.0.1:8080/api/auth/logout -o /dev/null
+          echo "Compose web, API readiness, and reverse-proxy same-origin POST checks passed."
 
       - name: Check backup script syntax
         run: bash -n scripts/backup-db.sh scripts/restore-db.sh scripts/test-db-backup.sh scripts/prepare-kvm-host.sh scripts/test-prepare-kvm-host.sh scripts/smoke-test-kvm-host.sh scripts/backup-vps-disks.sh scripts/test-vps-disk-backup.sh
