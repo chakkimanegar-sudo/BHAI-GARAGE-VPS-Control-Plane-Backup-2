@@ -7,9 +7,10 @@ trap 'rm -rf -- "$temporary_root"' EXIT
 
 test_root="$temporary_root/host"
 fake_bin="$temporary_root/bin"
-image_dir="$test_root/var/lib/bhai-garage/images"
-vm_dir="$test_root/var/lib/bhai-garage/vms"
+image_dir="$test_root/var/lib/libvirt/images/bhai-garage-base"
+vm_dir="$test_root/var/lib/libvirt/images/bhai-garage-vms"
 mkdir -p "$fake_bin" "$image_dir" "$vm_dir" "$test_root/etc" "$test_root/proc" "$test_root/dev"
+chmod 0750 "$vm_dir"
 
 cat > "$test_root/etc/os-release" <<'OS_RELEASE'
 ID=ubuntu
@@ -49,10 +50,19 @@ FAKE_CLOUD_LOCALDS
 chmod 700 "$fake_bin/"*
 export PATH="$fake_bin:$PATH"
 export BHAI_KVM_HOST_TEST_ROOT="$test_root"
-export BHAI_IMAGE_DIR=/var/lib/bhai-garage/images
-export BHAI_VM_DIR=/var/lib/bhai-garage/vms
+export BHAI_IMAGE_DIR=/var/lib/libvirt/images/bhai-garage-base
+export BHAI_VM_DIR=/var/lib/libvirt/images/bhai-garage-vms
 export BHAI_AGENT_UID="$(id -u)"
 export BHAI_AGENT_GID="$(id -g)"
+
+# A closed 0750 storage directory must not be reported ready: system QEMU runs
+# as libvirt-qemu and needs search-only access to the disk's parent directory.
+if bash "$root/scripts/prepare-kvm-host.sh" --check >"$temporary_root/no-qemu-search.out" 2>&1; then
+  echo "Host preflight unexpectedly accepted VM storage without QEMU search access." >&2
+  exit 1
+fi
+grep -Fq 'must grant search-only access to libvirt-qemu' "$temporary_root/no-qemu-search.out"
+chmod 0711 "$vm_dir"
 
 # Production provisioning must use the stable released image stream, not daily builds.
 grep -Fq 'readonly IMAGE_URL="https://cloud-images.ubuntu.com/releases/noble/release"' "$root/scripts/prepare-kvm-host.sh"
