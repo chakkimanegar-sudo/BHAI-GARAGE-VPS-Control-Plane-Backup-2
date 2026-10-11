@@ -211,7 +211,14 @@ export const CreateVpsBody = zod.object({
   "memoryMb": zod.number().int().min(createVpsBodyMemoryMbMin).max(createVpsBodyMemoryMbMax),
   "diskGb": zod.number().int().min(createVpsBodyDiskGbMin).max(createVpsBodyDiskGbMax),
   "hostId": zod.string().uuid().nullish(),
-  "sshPublicKey": zod.string().max(createVpsBodySshPublicKeyMax).optional()
+  "sshPublicKey": zod.string().max(createVpsBodySshPublicKeyMax).optional(),
+  "publicNetwork": zod.object({
+    "ipAddress": zod.string().regex(/^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$/),
+    "prefixLength": zod.number().int().min(1).max(32),
+    "gateway": zod.string().regex(/^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$/),
+    "macAddress": zod.string().regex(/^(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/),
+    "nameservers": zod.array(zod.string().regex(/^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$/)).min(1).max(4)
+  }).optional()
 })
 
 export const CreateVpsResponse = zod.object({
@@ -474,7 +481,14 @@ export const ClaimAgentOperationResponse = zod.object({
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 }),
-  "sshPublicKey": zod.string().nullish()
+  "sshPublicKey": zod.string().nullish(),
+  "publicNetwork": zod.object({
+    "ipAddress": zod.string().regex(/^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$/),
+    "prefixLength": zod.number().int().min(1).max(32),
+    "gateway": zod.string().regex(/^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$/),
+    "macAddress": zod.string().regex(/^(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/),
+    "nameservers": zod.array(zod.string().regex(/^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$/)).min(1).max(4)
+  }).nullish()
 }),zod.null()])
 })
 
