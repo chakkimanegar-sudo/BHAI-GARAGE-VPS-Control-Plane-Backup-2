@@ -18,6 +18,7 @@ node_modules
 /images/
 /vms/
 /var/
+/backups/
 
 # IDEs and editors
 /.idea
