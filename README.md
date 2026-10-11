@@ -99,7 +99,8 @@ BHAI_VM_DIR=/var/lib/bhai-garage/vms
 BHAI_IMAGES_JSON='{"ubuntu-24.04":"/var/lib/bhai-garage/images/noble-server-cloudimg-amd64.img"}'
 BHAI_AGENT_UID=1000
 BHAI_AGENT_GID=1000
-LIBVIRT_GID=<numeric-group-id-of-/var/run/libvirt/libvirt-sock>
+# Replace with output of: stat -c %g /var/run/libvirt/libvirt-sock
+LIBVIRT_GID=replace_with_numeric_group_id
 ```
 
 Do not switch `BHAI_PROVISIONER=libvirt` until the control plane has registered the host and it reports a fresh successful heartbeat.
