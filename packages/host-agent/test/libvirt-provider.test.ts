@@ -68,6 +68,69 @@ test("static public network config renders a safe cloud-init bridge and rejects 
   assert.throws(() => renderBridgeInterfaceXml("bridge-name-that-is-too-long", publicNetwork.macAddress), /Invalid public bridge/);
 });
 
+test("a newly provisioned VPS directory grants libvirt-qemu search-only access", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "bhai-garage-vps-path-test-"));
+  const originalPath = process.env.PATH;
+  const bin = path.join(root, "bin");
+  const images = path.join(root, "images");
+  const storage = path.join(root, "vms");
+  const image = path.join(images, "ubuntu-24.04.qcow2");
+  const stateFile = path.join(root, "domain-state");
+  const definedFile = path.join(root, "domain-defined");
+  const config: AgentConfig = {
+    apiUrl: new URL("https://garage.example.invalid/api"),
+    token: "x".repeat(48),
+    hostname: "test-host",
+    imageDirectory: images,
+    storageDirectory: storage,
+    libvirtUri: "qemu:///system",
+    libvirtNetwork: "default",
+    images: { "ubuntu-24.04": image },
+    pollIntervalMs: 5000,
+  };
+
+  try {
+    await mkdir(bin, { recursive: true });
+    await mkdir(images, { recursive: true });
+    await mkdir(storage, { recursive: true, mode: 0o711 });
+    await writeFile(image, "fake cloud image");
+    await writeFile(stateFile, "shut off\n");
+    await executable(path.join(bin, "virsh"), [
+      "#!/bin/sh",
+      'case "$3" in',
+      '  list) if [ -f "' + definedFile + '" ]; then echo "' + DOMAIN + '"; fi; exit 0 ;;',
+      '  define) touch "' + definedFile + '"; printf "shut off\\n" > "' + stateFile + '"; exit 0 ;;',
+      '  start) printf "running\\n" > "' + stateFile + '"; exit 0 ;;',
+      '  domstate) cat "' + stateFile + '"; exit 0 ;;',
+      '  domifaddr) exit 1 ;;',
+      '  *) echo "unexpected command: $*" >&2; exit 90 ;;',
+      "esac",
+      "",
+    ].join("\n"));
+    await executable(path.join(bin, "qemu-img"), [
+      "#!/bin/sh",
+      'case "$1" in',
+      '  create) touch "$8"; exit 0 ;;',
+      '  *) exit 0 ;;',
+      "esac",
+      "",
+    ].join("\n"));
+    await executable(path.join(bin, "cloud-localds"), '#!/bin/sh\ntouch "$1"\nexit 0\n');
+    process.env.PATH = bin + ":" + (originalPath ?? "/usr/bin:/bin");
+
+    const provider = new LibvirtProvider(config);
+    await provider.execute(operation("create"));
+
+    const instanceDirectory = path.join(storage, DOMAIN);
+    const directory = await stat(instanceDirectory);
+    assert.equal(directory.mode & 0o777, 0o711, "libvirt-qemu must have search-only access to the new VM directory");
+    assert.equal(directory.mode & 0o700, 0o700, "the host agent retains owner access");
+  } finally {
+    process.env.PATH = originalPath;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("libvirt outages and unconfirmed rollback preserve VPS storage", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "bhai-garage-libvirt-test-"));
   const originalPath = process.env.PATH;
