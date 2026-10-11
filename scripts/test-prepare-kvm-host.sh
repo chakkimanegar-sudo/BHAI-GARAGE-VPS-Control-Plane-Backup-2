@@ -12,7 +12,7 @@ vm_dir="$test_root/var/lib/libvirt/images/bhai-garage-vms"
 mkdir -p "$fake_bin" "$image_dir" "$vm_dir" "$test_root/etc" "$test_root/proc" "$test_root/dev"
 existing_vps_dir="$vm_dir/bg-00000000000040008000000000000002"
 mkdir -p "$existing_vps_dir"
-chmod 0750 "$vm_dir" "$existing_vps_dir"
+chmod 2710 "$vm_dir" "$existing_vps_dir"
 
 cat > "$test_root/etc/os-release" <<'OS_RELEASE'
 ID=ubuntu
@@ -56,23 +56,25 @@ export BHAI_IMAGE_DIR=/var/lib/libvirt/images/bhai-garage-base
 export BHAI_VM_DIR=/var/lib/libvirt/images/bhai-garage-vms
 export BHAI_AGENT_UID="$(id -u)"
 export BHAI_AGENT_GID="$(id -g)"
+export BHAI_QEMU_GID="$(id -g)"
 
-# A closed 0750 storage directory must not be reported ready: system QEMU runs
-# as libvirt-qemu and needs search-only access to the disk's parent directory.
+# setgid and the libvirt-qemu group are required in addition to traversal.
+chmod 0700 "$vm_dir"
 if bash "$root/scripts/prepare-kvm-host.sh" --check >"$temporary_root/no-qemu-search.out" 2>&1; then
-  echo "Host preflight unexpectedly accepted VM storage without QEMU search access." >&2
+  echo "Host preflight unexpectedly accepted storage without QEMU group/setgid permissions." >&2
   exit 1
 fi
-grep -Fq 'must grant search-only access to libvirt-qemu' "$temporary_root/no-qemu-search.out"
-chmod 0711 "$vm_dir"
+grep -Fq 'VM storage must be owned by agent UID' "$temporary_root/no-qemu-search.out"
+chmod 2710 "$vm_dir"
 
-# Existing per-VPS directories need the same traversal bit as their parent.
+# Existing per-VPS directory must also have setgid/search mode for QEMU.
+chmod 0700 "$existing_vps_dir"
 if bash "$root/scripts/prepare-kvm-host.sh" --check >"$temporary_root/no-vps-search.out" 2>&1; then
-  echo "Host preflight unexpectedly accepted a VPS directory without QEMU search access." >&2
+  echo "Host preflight unexpectedly accepted a VPS directory without QEMU group access." >&2
   exit 1
 fi
-grep -Fq 'Existing VM directory is not searchable by libvirt-qemu' "$temporary_root/no-vps-search.out"
-chmod 0711 "$existing_vps_dir"
+grep -Fq 'Existing VPS directory must use agent UID' "$temporary_root/no-vps-search.out"
+chmod 2710 "$existing_vps_dir"
 
 # A custom path outside libvirt's standard image tree is rejected rather than
 # silently creating a guest that AppArmor cannot access.
