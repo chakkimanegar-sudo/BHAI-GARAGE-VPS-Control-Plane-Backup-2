@@ -38,3 +38,6 @@ jobs:
 
       - name: Test host agent
         run: pnpm --filter @workspace/host-agent run test
+
+      - name: Test API server recovery logic
+        run: pnpm --filter @workspace/api-server run test
