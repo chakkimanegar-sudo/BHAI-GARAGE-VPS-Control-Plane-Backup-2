@@ -111,6 +111,12 @@ async function runOnce(): Promise<void> {
 
 async function main(): Promise<void> {
   await mkdir(config.storageDirectory, { recursive: true, mode: 0o750 });
+  log("preflight-started");
+  await provider.checkReady();
+  log("preflight-passed", {
+    libvirtNetwork: config.libvirtNetwork,
+    configuredImages: Object.keys(config.images),
+  });
   log("started", {
     apiHost: config.apiUrl.hostname,
     pollIntervalMs: config.pollIntervalMs,
@@ -134,6 +140,9 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  log("startup-failed", { errorType: error instanceof Error ? error.name : "UnknownError" });
+  log("startup-failed", {
+    errorType: error instanceof Error ? error.name : "UnknownError",
+    errorMessage: error instanceof Error ? error.message.slice(0, 500) : "Unknown startup error",
+  });
   process.exitCode = 1;
 });
