@@ -83,6 +83,7 @@ test("a newly provisioned VPS directory grants libvirt-qemu search-only access",
     hostname: "test-host",
     imageDirectory: images,
     storageDirectory: storage,
+    qemuGid: typeof process.getgid === "function" ? process.getgid() : 0,
     libvirtUri: "qemu:///system",
     libvirtNetwork: "default",
     images: { "ubuntu-24.04": image },
@@ -92,7 +93,8 @@ test("a newly provisioned VPS directory grants libvirt-qemu search-only access",
   try {
     await mkdir(bin, { recursive: true });
     await mkdir(images, { recursive: true });
-    await mkdir(storage, { recursive: true, mode: 0o711 });
+    await mkdir(storage, { recursive: true, mode: 0o2710 });
+    await chmod(storage, 0o2710);
     await writeFile(image, "fake cloud image");
     await writeFile(stateFile, "shut off\n");
     await executable(path.join(bin, "virsh"), [
@@ -123,8 +125,15 @@ test("a newly provisioned VPS directory grants libvirt-qemu search-only access",
 
     const instanceDirectory = path.join(storage, DOMAIN);
     const directory = await stat(instanceDirectory);
-    assert.equal(directory.mode & 0o777, 0o711, "libvirt-qemu must have search-only access to the new VM directory");
-    assert.equal(directory.mode & 0o700, 0o700, "the host agent retains owner access");
+    const disk = await stat(path.join(instanceDirectory, "root.qcow2"));
+    const seed = await stat(path.join(instanceDirectory, "cloud-init.iso"));
+    const qemuGid = typeof process.getgid === "function" ? process.getgid() : 0;
+    assert.equal(directory.mode & 0o7777, 0o2710, "new VM directory must be setgid and group-searchable only");
+    assert.equal(directory.gid, qemuGid, "new VM directory must inherit the libvirt-qemu group");
+    assert.equal(disk.mode & 0o777, 0o660, "QEMU needs group read/write on the guest disk but no world access");
+    assert.equal(disk.gid, qemuGid, "guest disk must inherit libvirt-qemu group");
+    assert.equal(seed.mode & 0o777, 0o640, "QEMU needs group read-only access to cloud-init ISO");
+    assert.equal(seed.gid, qemuGid, "cloud-init ISO must inherit libvirt-qemu group");
   } finally {
     process.env.PATH = originalPath;
     await rm(root, { recursive: true, force: true });
@@ -157,6 +166,8 @@ test("libvirt outages and unconfirmed rollback preserve VPS storage", async () =
     await mkdir(bin, { recursive: true });
     await mkdir(images, { recursive: true });
     await mkdir(instanceDirectory, { recursive: true });
+    await chmod(storage, 0o2710);
+    await chmod(instanceDirectory, 0o2710);
     await writeFile(image, "fake cloud image");
     await writeFile(disk, "keep this VPS disk");
     process.env.PATH = `${bin}:${originalPath ?? "/usr/bin:/bin"}`;
