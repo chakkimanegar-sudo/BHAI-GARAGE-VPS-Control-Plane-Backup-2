@@ -6,19 +6,14 @@ test("an exhausted create operation is marked failed", () => {
   assert.equal(exhaustedOperationStatus("create", { sshPublicKey: "ssh-ed25519 AAAA" }), "failed");
 });
 
-test("an exhausted lifecycle operation restores its recorded running state", () => {
+test("exhausted lifecycle actions are marked failed because execution outcome is unknown", () => {
   for (const action of ["start", "stop", "restart", "delete"]) {
-    assert.equal(exhaustedOperationStatus(action, { previousStatus: "running" }), "running");
+    assert.equal(exhaustedOperationStatus(action, { previousStatus: "running" }), "failed");
+    assert.equal(exhaustedOperationStatus(action, { previousStatus: "stopped" }), "failed");
   }
 });
 
-test("an exhausted lifecycle operation restores its recorded stopped state", () => {
-  for (const action of ["start", "stop", "restart", "delete"]) {
-    assert.equal(exhaustedOperationStatus(action, { previousStatus: "stopped" }), "stopped");
-  }
-});
-
-test("untrusted or missing prior state fails closed", () => {
+test("unknown actions and missing prior state also fail closed", () => {
   assert.equal(exhaustedOperationStatus("restart", null), "failed");
   assert.equal(exhaustedOperationStatus("delete", { previousStatus: "provisioning" }), "failed");
   assert.equal(exhaustedOperationStatus("unknown-action", { previousStatus: "running" }), "failed");

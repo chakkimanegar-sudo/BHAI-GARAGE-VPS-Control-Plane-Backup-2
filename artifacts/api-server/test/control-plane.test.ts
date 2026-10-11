@@ -164,7 +164,7 @@ test("logout revokes the persisted session", async () => {
 });
 
 
-test("host-agent polling recovers exhausted stale operations and restores VPS inventory state", async () => {
+test("host-agent polling marks exhausted stale operations as uncertain", async () => {
   const hostName = `recovery-${randomUUID().slice(0, 8)}`;
   const agentToken = newOpaqueToken();
   const [host] = await db.insert(hosts).values({
@@ -235,7 +235,7 @@ test("host-agent polling recovers exhausted stale operations and restores VPS in
     const [stopOperation] = await db.select().from(agentOperations).where(eq(agentOperations.id, operations[1]!.id));
 
     assert.equal(createVps?.status, "failed");
-    assert.equal(deletingVps?.status, "running");
+    assert.equal(deletingVps?.status, "failed");
     assert.equal(createOperation?.state, "failed");
     assert.equal(stopOperation?.state, "failed");
 
