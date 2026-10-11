@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-root="$(cd -- "$(dirname -- "\${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 temporary_root="$(mktemp -d)"
 trap 'rm -rf -- "$temporary_root"' EXIT
 
@@ -23,7 +23,7 @@ printf 'mock qcow2 image\n' > "$image_dir/noble-server-cloudimg-amd64.img"
 cat > "$fake_bin/virsh" <<'FAKE_VIRSH'
 #!/usr/bin/env bash
 set -Eeuo pipefail
-case "\${3:-}" in
+case "${3:-}" in
   uri) printf 'qemu:///system\n' ;;
   capabilities)
     printf "%s\n" "<capabilities><host><cpu><arch>x86_64</arch></cpu></host><guest><arch name='x86_64'><domain type='kvm'></domain></arch></guest></capabilities>"
