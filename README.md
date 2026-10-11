@@ -43,6 +43,28 @@ For an externally reachable deployment, put the web service behind a maintained 
 - `GET /api/readyz` — database connectivity/readiness.
 - Nginx also exposes `/healthz` and `/readyz` aliases.
 
+### Database backup and restore
+
+Run these commands from the project directory on the machine that runs Docker Compose. The script backs up the Compose `db` PostgreSQL service to a local file; it does not back up VM disks or create live VM snapshots.
+
+Create a backup:
+
+```sh
+bash scripts/backup-db.sh
+```
+
+By default, backups are written to `./backups/postgres`, protected by owner-only file permissions, accompanied by a SHA-256 checksum, and rotated after 14 days. You can change the destination and retention period with `BHAI_BACKUP_DIR` and `BHAI_BACKUP_RETENTION_DAYS`. Store a separate copy off the host; a backup on the same disk does not protect against disk loss.
+
+Restore only when necessary. **This replaces matching database objects.** First take a fresh backup, stop the API so it cannot write during restoration, verify that the selected backup is the intended one, and then run:
+
+```sh
+docker compose stop api
+bash scripts/restore-db.sh ./backups/postgres/your-backup.dump --confirm
+docker compose start api
+```
+
+The restore script refuses to proceed without the explicit `--confirm` argument, a matching checksum file, and a valid SHA-256 digest. Verify the application and audit data after restore. Keep VM storage backups separate from PostgreSQL backups.
+
 ### Useful development commands
 
 ```sh
