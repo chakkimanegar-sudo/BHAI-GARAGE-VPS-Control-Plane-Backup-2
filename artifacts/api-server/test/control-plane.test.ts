@@ -3,8 +3,8 @@ import { randomUUID, randomBytes } from "node:crypto";
 import { once } from "node:events";
 import { after, before, test } from "node:test";
 import { eq } from "drizzle-orm";
-import { db, pool, adminAccounts, auditEvents, vpsInstances } from "@workspace/db";
-import { hashPassword } from "../src/lib/security.ts";
+import { db, pool, adminAccounts, agentOperations, auditEvents, hosts, vpsInstances } from "@workspace/db";
+import { hashAgentToken, hashPassword, newOpaqueToken } from "../src/lib/security.ts";
 import app from "../src/app.ts";
 
 const testEmail = `control-plane-${randomUUID()}@example.invalid`;
@@ -161,4 +161,95 @@ test("logout revokes the persisted session", async () => {
   assert.equal(logout.status, 200);
   const afterLogout = await fetch(`${apiBase}/dashboard`, { headers: { cookie } });
   assert.equal(afterLogout.status, 401);
+});
+
+
+test("host-agent polling recovers exhausted stale operations and restores VPS inventory state", async () => {
+  const hostName = `recovery-${randomUUID().slice(0, 8)}`;
+  const agentToken = newOpaqueToken();
+  const [host] = await db.insert(hosts).values({
+    name: hostName,
+    tokenHash: hashAgentToken(agentToken),
+    simulation: 0,
+  }).returning();
+  const vpsIds: string[] = [];
+
+  try {
+    const instances = await db.insert(vpsInstances).values([
+      {
+        name: `recovery-create-${randomUUID().slice(0, 8)}`,
+        hostId: host.id,
+        osImage: "ubuntu-24.04",
+        vcpus: 2,
+        memoryMb: 2048,
+        diskGb: 20,
+        status: "provisioning",
+        provider: "libvirt",
+      },
+      {
+        name: `recovery-delete-${randomUUID().slice(0, 8)}`,
+        hostId: host.id,
+        osImage: "ubuntu-24.04",
+        vcpus: 2,
+        memoryMb: 2048,
+        diskGb: 20,
+        status: "deleting",
+        provider: "libvirt",
+      },
+    ]).returning();
+    vpsIds.push(...instances.map((instance) => instance.id));
+
+    const staleClaimedAt = new Date(Date.now() - 6 * 60 * 1000);
+    const operations = await db.insert(agentOperations).values([
+      {
+        hostId: host.id,
+        vpsId: instances[0]!.id,
+        action: "create",
+        state: "claimed",
+        attempts: 10,
+        claimedAt: staleClaimedAt,
+        payload: { sshPublicKey: "ssh-ed25519 AAAA" },
+      },
+      {
+        hostId: host.id,
+        vpsId: instances[1]!.id,
+        action: "delete",
+        state: "claimed",
+        attempts: 10,
+        claimedAt: staleClaimedAt,
+        payload: { previousStatus: "running" },
+      },
+    ]).returning();
+
+    const response = await fetch(`${apiBase}/agent/operations/next`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${agentToken}` },
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json() as { operation: unknown | null };
+    assert.equal(body.operation, null);
+
+    const [createVps] = await db.select().from(vpsInstances).where(eq(vpsInstances.id, instances[0]!.id));
+    const [deletingVps] = await db.select().from(vpsInstances).where(eq(vpsInstances.id, instances[1]!.id));
+    const [createOperation] = await db.select().from(agentOperations).where(eq(agentOperations.id, operations[0]!.id));
+    const [stopOperation] = await db.select().from(agentOperations).where(eq(agentOperations.id, operations[1]!.id));
+
+    assert.equal(createVps?.status, "failed");
+    assert.equal(deletingVps?.status, "running");
+    assert.equal(createOperation?.state, "failed");
+    assert.equal(stopOperation?.state, "failed");
+
+    for (const vpsId of vpsIds) {
+      const events = await db.select().from(auditEvents).where(eq(auditEvents.resourceId, vpsId));
+      assert.ok(events.some((event) => event.action === "agent.operation.exhausted"));
+    }
+  } finally {
+    await db.delete(agentOperations).where(eq(agentOperations.hostId, host.id));
+    await db.delete(auditEvents).where(eq(auditEvents.actor, `host-agent:${hostName}`));
+    for (const vpsId of vpsIds) {
+      await db.delete(auditEvents).where(eq(auditEvents.resourceId, vpsId));
+      await db.delete(vpsInstances).where(eq(vpsInstances.id, vpsId));
+    }
+    await db.delete(hosts).where(eq(hosts.id, host.id));
+  }
 });
