@@ -55,10 +55,13 @@ jobs:
         run: pnpm run build
 
       - name: Check backup script syntax
-        run: bash -n scripts/backup-db.sh scripts/restore-db.sh scripts/test-db-backup.sh
+        run: bash -n scripts/backup-db.sh scripts/restore-db.sh scripts/test-db-backup.sh scripts/prepare-kvm-host.sh scripts/test-prepare-kvm-host.sh
 
       - name: Test backup rotation and restore safety
         run: bash scripts/test-db-backup.sh
+
+      - name: Test KVM host preparation and preflight
+        run: bash scripts/test-prepare-kvm-host.sh
 
       - name: Test host agent
         run: pnpm --filter @workspace/host-agent run test

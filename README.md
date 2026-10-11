@@ -78,6 +78,35 @@ pnpm --filter @workspace/host-agent run test
 
 The API workflow uses port 5000 and the web artifact uses Vite. Set `BHAI_SETUP_TOKEN` before starting the API if you intend to create the first admin account. `SESSION_SECRET` and `DATABASE_URL` are also required for normal operation.
 
+## Prepare a real KVM host
+
+The host preparation helper supports **Ubuntu Server 24.04 LTS on x86-64 bare metal**. It installs KVM/libvirt/QEMU tools, activates libvirt's default NAT network, creates the host image/VM storage directories, and downloads Canonical's Ubuntu 24.04 AMD64 cloud image only after verifying the signed SHA-256 manifest.
+
+Run on the **new Linux host** from this repository checkout:
+
+```sh
+sudo bash scripts/prepare-kvm-host.sh --install
+sudo bash scripts/prepare-kvm-host.sh --check
+```
+
+The install mode requires root and may install packages and activate the libvirt default network. The check mode is read-only and fails if the host does not expose CPU virtualization and `/dev/kvm`, if libvirt cannot provide an x86-64 KVM guest, or if the cloud image/storage/network are not ready. It does not create any VM.
+
+For the Compose host-agent, configure the host-side image and VM directories, the image map inside the container, and the numeric group ID of the libvirt socket. Starting values after running the helper are:
+
+```sh
+BHAI_IMAGE_DIR=/var/lib/bhai-garage/images
+BHAI_VM_DIR=/var/lib/bhai-garage/vms
+BHAI_IMAGES_JSON='{"ubuntu-24.04":"/var/lib/bhai-garage/images/noble-server-cloudimg-amd64.img"}'
+BHAI_AGENT_UID=1000
+BHAI_AGENT_GID=1000
+# Replace with output of: stat -c %g /var/run/libvirt/libvirt-sock
+LIBVIRT_GID=replace_with_numeric_group_id
+```
+
+Do not switch `BHAI_PROVISIONER=libvirt` until the control plane has registered the host and it reports a fresh successful heartbeat.
+
+**Networking boundary:** this helper only prepares libvirt's default NAT network for guest outbound connectivity. It intentionally does not alter host firewalls or public interfaces. The current host-agent domain XML does not yet allocate a public IP per VPS, assign provider-specific virtual MAC addresses, or create inbound port-forward rules; therefore public guest ingress remains an integration blocker even after host preflight passes. For example, OVHcloud documents a provider-specific Additional IP + virtual-MAC bridge workflow, whose availability depends on the exact server range: [virtual MAC for Additional IPs](https://docs.ovhcloud.com/en/guides/bare-metal-cloud/dedicated-servers/network-virtual-mac) and [bridged guest networking](https://docs.ovhcloud.com/en/guides/bare-metal-cloud/dedicated-servers/network-bridging). These steps require real IPs allocated to your account and must be validated against the purchased server. Keep management ports private, preserve SSH access, and only expose ports allowed by the host/provider firewall policy.
+
 ## Connect a Linux KVM/libvirt host
 
 Real provisioning requires a Linux machine you control or rent, with hardware virtualization enabled (Intel VT-x or AMD-V), KVM, libvirt, QEMU, a working `qemu:///system` socket, and a configured libvirt network. The agent intentionally refuses remote libvirt URIs and only accepts a fixed set of image IDs.
