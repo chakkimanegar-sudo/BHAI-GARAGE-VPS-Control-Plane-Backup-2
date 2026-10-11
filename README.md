@@ -126,8 +126,8 @@ Real provisioning requires a Linux machine you control or rent, with hardware vi
    BHAI_IMAGES_JSON='{"ubuntu-24.04":"/var/lib/bhai-garage/images/ubuntu-24.04.qcow2","debian-12":"/var/lib/bhai-garage/images/debian-12.qcow2"}'
    BHAI_VM_STORAGE=/var/lib/bhai-garage/vms
    BHAI_LIBVIRT_NETWORK=default
-# Set only after a provider-compatible Linux bridge exists and is UP on the host.
-BHAI_LIBVIRT_BRIDGE=br-ex
+# Optional; uncomment only after a provider-compatible Linux bridge exists and is UP.
+# BHAI_LIBVIRT_BRIDGE=br-ex
    ```
 
    Protect the agent environment file with owner-only permissions. Add the service user to the host's libvirt socket group, and grant it write access only to the VM storage directory.
