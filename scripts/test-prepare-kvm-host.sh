@@ -29,6 +29,7 @@ case "${3:-}" in
     printf "%s\n" "<capabilities><host><cpu><arch>x86_64</arch></cpu></host><guest><arch name='x86_64'><domain type='kvm'></domain></arch></guest></capabilities>"
     ;;
   net-info) printf 'Name: default\nActive: yes\n' ;;
+  net-dumpxml) printf "%s\n" "<network><forward mode=\"nat\"/></network>" ;;
   *) echo "Unexpected virsh invocation: $*" >&2; exit 90 ;;
 esac
 FAKE_VIRSH
