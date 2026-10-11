@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 readonly IMAGE_FILE="noble-server-cloudimg-amd64.img"
-readonly IMAGE_URL="https://cloud-images.ubuntu.com/noble/current"
+readonly IMAGE_URL="https://cloud-images.ubuntu.com/releases/noble/release"
 readonly CONTAINER_IMAGE_DIR="/var/lib/bhai-garage/images"
 
 MODE="check"
@@ -99,7 +99,7 @@ if [[ "$MODE" == "install" ]]; then
   command -v apt-get >/dev/null 2>&1 || fail "apt-get is required."
   apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    ca-certificates curl gpgv ubuntu-keyring \
+    ca-certificates curl gpgv ubuntu-keyring ubuntu-cloudimage-keyring \
     qemu-kvm libvirt-daemon-system libvirt-clients qemu-utils cloud-image-utils
 
   systemctl enable --now libvirtd
