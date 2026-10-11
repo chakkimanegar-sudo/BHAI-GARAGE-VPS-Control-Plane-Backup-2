@@ -1,0 +1,107 @@
+import assert from "node:assert/strict";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { test } from "node:test";
+import { LibvirtProvider } from "../src/libvirt-provider.ts";
+import type { AgentConfig } from "../src/config.ts";
+import type { AgentOperation } from "../src/types.ts";
+
+const VPS_ID = "00000000-0000-4000-8000-000000000002";
+const DOMAIN = `bg-${VPS_ID.replaceAll("-", "").toLowerCase()}`;
+
+function operation(action: AgentOperation["action"]): AgentOperation {
+  return {
+    id: "00000000-0000-4000-8000-000000000001",
+    action,
+    sshPublicKey: action === "create" ? "ssh-ed25519 AAAA ci-test" : null,
+    vps: {
+      id: VPS_ID,
+      name: "safe-vps",
+      hostId: "00000000-0000-4000-8000-000000000003",
+      hostName: "test-host",
+      ipAddress: null,
+      osImage: "ubuntu-24.04",
+      vcpus: 2,
+      memoryMb: 2048,
+      diskGb: 20,
+      status: action === "create" ? "provisioning" : "running",
+      provider: "libvirt",
+      cpuUsagePercent: 0,
+      memoryUsedMb: 0,
+      diskUsedGb: 0,
+      networkRxMbps: 0,
+      networkTxMbps: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
+
+async function executable(file: string, contents: string): Promise<void> {
+  await writeFile(file, contents, { mode: 0o700 });
+  await chmod(file, 0o700);
+}
+
+test("libvirt outages and unconfirmed rollback preserve VPS storage", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "bhai-garage-libvirt-test-"));
+  const originalPath = process.env.PATH;
+  const bin = path.join(root, "bin");
+  const images = path.join(root, "images");
+  const storage = path.join(root, "vms");
+  const image = path.join(images, "ubuntu-24.04.qcow2");
+  const instanceDirectory = path.join(storage, DOMAIN);
+  const disk = path.join(instanceDirectory, "root.qcow2");
+  const stateFile = path.join(root, "domain-defined");
+  const config: AgentConfig = {
+    apiUrl: new URL("https://garage.example.invalid/api"),
+    token: "x".repeat(48),
+    hostname: "test-host",
+    imageDirectory: images,
+    storageDirectory: storage,
+    libvirtUri: "qemu:///system",
+    libvirtNetwork: "default",
+    images: { "ubuntu-24.04": image },
+    pollIntervalMs: 5000,
+  };
+
+  try {
+    await mkdir(bin, { recursive: true });
+    await mkdir(images, { recursive: true });
+    await mkdir(instanceDirectory, { recursive: true });
+    await writeFile(image, "fake cloud image");
+    await writeFile(disk, "keep this VPS disk");
+    process.env.PATH = `${bin}:${originalPath ?? "/usr/bin:/bin"}`;
+
+    // A libvirt connection error must not be interpreted as "domain absent".
+    await executable(path.join(bin, "virsh"), "#!/bin/sh\nexit 1\n");
+    const provider = new LibvirtProvider(config);
+    await assert.rejects(provider.execute(operation("delete")));
+    assert.equal(await readFile(disk, "utf8"), "keep this VPS disk");
+
+    // Simulate a partial create: define succeeds, start fails, and undefine fails.
+    // The provider must retain files because it cannot confirm the domain is gone.
+    await rm(stateFile, { force: true });
+    await executable(path.join(bin, "virsh"), [
+      "#!/bin/sh",
+      'case "$3" in',
+      '  list) if [ -f "' + stateFile + '" ]; then echo "' + DOMAIN + '"; fi; exit 0 ;;',
+      '  define) touch "' + stateFile + '"; exit 0 ;;',
+      '  domstate) echo "shut off"; exit 0 ;;',
+      '  start|undefine) exit 1 ;;',
+      '  *) exit 0 ;;',
+      "esac",
+      "",
+    ].join("\n"));
+    await executable(path.join(bin, "qemu-img"), '#!/bin/sh\ntouch "$8"\nexit 0\n');
+    await executable(path.join(bin, "cloud-localds"), '#!/bin/sh\ntouch "$1"\nexit 0\n');
+
+    await assert.rejects(provider.execute(operation("create")));
+    assert.equal(await readFile(disk, "utf8"), "keep this VPS disk");
+    assert.equal(await readFile(stateFile, "utf8").catch(() => ""), "");
+    assert.equal((await readFile(path.join(instanceDirectory, "user-data"), "utf8")).includes("ssh_authorized_keys"), true);
+  } finally {
+    process.env.PATH = originalPath;
+    await rm(root, { recursive: true, force: true });
+  }
+});
