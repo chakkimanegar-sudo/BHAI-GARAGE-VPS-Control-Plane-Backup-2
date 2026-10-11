@@ -187,13 +187,13 @@ test("host-agent polling recovers exhausted stale operations and restores VPS in
         provider: "libvirt",
       },
       {
-        name: `recovery-stop-${randomUUID().slice(0, 8)}`,
+        name: `recovery-delete-${randomUUID().slice(0, 8)}`,
         hostId: host.id,
         osImage: "ubuntu-24.04",
         vcpus: 2,
         memoryMb: 2048,
         diskGb: 20,
-        status: "stopped",
+        status: "deleting",
         provider: "libvirt",
       },
     ]).returning();
@@ -213,11 +213,11 @@ test("host-agent polling recovers exhausted stale operations and restores VPS in
       {
         hostId: host.id,
         vpsId: instances[1]!.id,
-        action: "stop",
+        action: "delete",
         state: "claimed",
         attempts: 10,
         claimedAt: staleClaimedAt,
-        payload: { previousStatus: "stopped" },
+        payload: { previousStatus: "running" },
       },
     ]).returning();
 
@@ -230,12 +230,12 @@ test("host-agent polling recovers exhausted stale operations and restores VPS in
     assert.equal(body.operation, null);
 
     const [createVps] = await db.select().from(vpsInstances).where(eq(vpsInstances.id, instances[0]!.id));
-    const [stoppedVps] = await db.select().from(vpsInstances).where(eq(vpsInstances.id, instances[1]!.id));
+    const [deletingVps] = await db.select().from(vpsInstances).where(eq(vpsInstances.id, instances[1]!.id));
     const [createOperation] = await db.select().from(agentOperations).where(eq(agentOperations.id, operations[0]!.id));
     const [stopOperation] = await db.select().from(agentOperations).where(eq(agentOperations.id, operations[1]!.id));
 
     assert.equal(createVps?.status, "failed");
-    assert.equal(stoppedVps?.status, "stopped");
+    assert.equal(deletingVps?.status, "running");
     assert.equal(createOperation?.state, "failed");
     assert.equal(stopOperation?.state, "failed");
 
