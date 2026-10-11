@@ -35,7 +35,7 @@ IMAGE_FILE="noble-server-cloudimg-amd64.img"
 [[ "$AGENT_UID" =~ ^[0-9]+$ && "$AGENT_GID" =~ ^[0-9]+$ ]] ||
   fail "BHAI_AGENT_UID and BHAI_AGENT_GID must be numeric."
 
-for tool in virsh qemu-img cloud-localds realpath grep head cut tr; do
+for tool in virsh qemu-img cloud-localds realpath grep head cut tr xargs seq; do
   command -v "$tool" >/dev/null 2>&1 || fail "Required command is missing: $tool"
 done
 
@@ -61,7 +61,6 @@ seed_path="$TEMP_DIR/cloud-init.iso"
 user_data_path="$TEMP_DIR/user-data"
 meta_data_path="$TEMP_DIR/meta-data"
 domain_xml_path="$TEMP_DIR/domain.xml"
-domain_defined=0
 
 cleanup() {
   local original_status=$?
@@ -118,11 +117,11 @@ chmod 0640 "$disk_path" "$seed_path" "$user_data_path" "$meta_data_path"
 
 xml_escape() {
   local value="$1"
-  value="\${value//&/&amp;}"
-  value="\${value//</&lt;}"
-  value="\${value//>/&gt;}"
-  value="\${value//\"/&quot;}"
-  value="\${value//\'/&apos;}"
+  value="${value//&/\&amp;}"
+  value="${value//</\&lt;}"
+  value="${value//>/\&gt;}"
+  value="${value//\"/\&quot;}"
+  value="${value//\'/\&apos;}"
   printf '%s' "$value"
 }
 
@@ -150,7 +149,6 @@ XML
 chmod 0640 "$domain_xml_path"
 
 virsh --connect qemu:///system define "$domain_xml_path" >/dev/null
-domain_defined=1
 virsh --connect qemu:///system start "$DOMAIN" >/dev/null
 note "Temporary guest $DOMAIN started; waiting up to five minutes for a default-NAT DHCP lease."
 
