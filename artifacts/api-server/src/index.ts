@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { ensureSimulationExamples } from "./lib/seed";
+import { validateEnvironment } from "./lib/env";
 
 const rawPort = process.env["PORT"];
 
@@ -17,6 +18,7 @@ if (Number.isNaN(port) || port <= 0) {
 }
 
 async function start(): Promise<void> {
+  validateEnvironment();
   await ensureSimulationExamples();
   const server = app.listen(port, () => {
     logger.info({ port }, "Server listening");
