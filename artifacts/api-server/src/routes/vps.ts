@@ -1,4 +1,4 @@
-import { and, asc, eq, ilike, inArray, or } from "drizzle-orm";
+import { and, asc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { Router, type IRouter } from "express";
 import { db, agentOperations, auditEvents, hosts, vpsInstances } from "@workspace/db";
@@ -101,31 +101,6 @@ router.post("/vps", requireAdmin, async (req, res): Promise<void> => {
       res.status(409).json({ error: "No online KVM host is reporting capacity. Register a Linux host agent before provisioning." });
       return;
     }
-    const allocatedVcpus = await db
-      .select({ id: vpsInstances.id, vcpus: vpsInstances.vcpus })
-      .from(vpsInstances)
-      .where(and(eq(vpsInstances.hostId, selectedHost.id), eq(vpsInstances.provider, "libvirt")));
-    const alreadyAllocatedCores = allocatedVcpus.reduce((sum, instance) => sum + instance.vcpus, 0);
-    const pendingInstances = await db
-      .select({ memoryMb: vpsInstances.memoryMb, diskGb: vpsInstances.diskGb })
-      .from(vpsInstances)
-      .where(and(
-        eq(vpsInstances.hostId, selectedHost.id),
-        eq(vpsInstances.provider, "libvirt"),
-        eq(vpsInstances.status, "provisioning"),
-      ));
-    const pendingMemoryMb = pendingInstances.reduce((sum, instance) => sum + instance.memoryMb, 0);
-    const pendingDiskGb = pendingInstances.reduce((sum, instance) => sum + instance.diskGb, 0);
-    const availableMemoryMb = selectedHost.totalMemoryMb - selectedHost.usedMemoryMb - pendingMemoryMb;
-    const availableDiskGb = selectedHost.diskTotalGb - selectedHost.diskUsedGb - pendingDiskGb;
-    if (
-      input.vcpus + alreadyAllocatedCores > Math.max(1, selectedHost.totalVcpus * 2) ||
-      input.memoryMb > availableMemoryMb ||
-      input.diskGb > availableDiskGb
-    ) {
-      res.status(409).json({ error: "The selected host does not have enough reported capacity for this VPS." });
-      return;
-    }
     assignedHostId = selectedHost.id;
   } else if (input.hostId) {
     const [requestedHost] = await db
@@ -150,6 +125,54 @@ router.post("/vps", requireAdmin, async (req, res): Promise<void> => {
   const id = randomUUID();
   try {
     const result = await db.transaction(async (tx) => {
+      if (liveMode) {
+        if (!assignedHostId) throw new Error("VPS_HOST_UNAVAILABLE");
+
+        // Serialize allocations per host. Capacity check and reservation insert
+        // must be one transaction so concurrent create requests cannot oversubscribe.
+        await tx.execute(sql`SELECT id FROM hosts WHERE id = ${assignedHostId} FOR UPDATE`);
+        const [lockedHost] = await tx.select().from(hosts)
+          .where(and(eq(hosts.id, assignedHostId), eq(hosts.simulation, 0)))
+          .limit(1);
+        if (!lockedHost || serializeHost(lockedHost).status !== "online") {
+          throw new Error("VPS_HOST_UNAVAILABLE");
+        }
+
+        // Every undeleted real VPS reserves its configured RAM/disk, including
+        // stopped or failed instances whose actual VM state may still exist.
+        const allocations = await tx.select({
+          vcpus: vpsInstances.vcpus,
+          memoryMb: vpsInstances.memoryMb,
+          diskGb: vpsInstances.diskGb,
+        }).from(vpsInstances).where(and(
+          eq(vpsInstances.hostId, assignedHostId),
+          eq(vpsInstances.provider, "libvirt"),
+        ));
+        const allocatedVcpus = allocations.reduce((total, item) => total + item.vcpus, 0);
+        const allocatedMemoryMb = allocations.reduce((total, item) => total + item.memoryMb, 0);
+        const allocatedDiskGb = allocations.reduce((total, item) => total + item.diskGb, 0);
+
+        // Cap guest commitments at 85% of reported host resources and also
+        // respect currently free physical resources. CPU keeps the documented 2x
+        // vCPU overcommit policy; RAM and disk reservations are not overcommitted.
+        const cpuBudget = Math.max(1, lockedHost.totalVcpus * 2);
+        const memoryBudgetMb = Math.max(0, Math.min(
+          Math.floor(lockedHost.totalMemoryMb * 0.85),
+          lockedHost.totalMemoryMb - lockedHost.usedMemoryMb,
+        ));
+        const diskBudgetGb = Math.max(0, Math.min(
+          Math.floor(lockedHost.diskTotalGb * 0.85),
+          lockedHost.diskTotalGb - lockedHost.diskUsedGb,
+        ));
+        if (
+          allocatedVcpus + input.vcpus > cpuBudget ||
+          allocatedMemoryMb + input.memoryMb > memoryBudgetMb ||
+          allocatedDiskGb + input.diskGb > diskBudgetGb
+        ) {
+          throw new Error("VPS_INSUFFICIENT_CAPACITY");
+        }
+      }
+
       const [created] = await tx.insert(vpsInstances).values({
         id,
         name: input.name,
@@ -203,6 +226,14 @@ router.post("/vps", requireAdmin, async (req, res): Promise<void> => {
       simulation: !liveMode,
     }));
   } catch (error) {
+    if (error instanceof Error && error.message === "VPS_HOST_UNAVAILABLE") {
+      res.status(409).json({ error: "The selected KVM host went offline before reservation; no VPS was created." });
+      return;
+    }
+    if (error instanceof Error && error.message === "VPS_INSUFFICIENT_CAPACITY") {
+      res.status(409).json({ error: "The selected host has insufficient unallocated CPU, memory, or disk capacity for this VPS." });
+      return;
+    }
     if (isUniqueViolation(error)) {
       res.status(409).json({ error: "The VPS name, public IPv4 address, or virtual MAC is already assigned." });
       return;
