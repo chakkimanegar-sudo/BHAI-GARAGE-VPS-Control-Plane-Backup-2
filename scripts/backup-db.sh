@@ -32,8 +32,10 @@ backup_file="$backup_dir/bhai-garage-$timestamp.dump"
 if [[ -e "$backup_file" || -e "$backup_file.sha256" ]]; then
   backup_file="$backup_dir/bhai-garage-$timestamp-$$.dump"
 fi
-temporary_file="$backup_file.tmp.$$"
-trap 'rm -f -- "$temporary_file"' EXIT
+temporary_file="$backup_file.tmp.$"
+temporary_checksum="$backup_file.sha256.tmp.$"
+restore_list="$backup_file.list.tmp.$"
+trap 'rm -f -- "$temporary_file" "$temporary_checksum" "$restore_list"' EXIT
 
 if ! docker compose exec -T db sh -c 'pg_dump --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --format=custom' > "$temporary_file"; then
   echo "PostgreSQL backup failed; the incomplete temporary file will be removed." >&2
@@ -44,13 +46,30 @@ if [[ ! -s "$temporary_file" ]]; then
   exit 1
 fi
 
-chmod 600 "$temporary_file"
+# A successful pg_dump process is not enough: validate the archive with the
+# database image's pg_restore before publishing a filename that looks usable.
+if ! docker compose exec -T db sh -c 'pg_restore --list' < "$temporary_file" > "$restore_list"; then
+  echo "PostgreSQL backup is not a readable custom-format archive; refusing to publish it." >&2
+  exit 1
+fi
+if [[ ! -s "$restore_list" ]]; then
+  echo "PostgreSQL backup archive has no readable table of contents; refusing to publish it." >&2
+  exit 1
+fi
+
+chmod 600 "$temporary_file" "$restore_list"
+digest="$(sha256sum -- "$temporary_file" | awk '{ print $1 }')"
+printf '%s  %s\n' "$digest" "$(basename -- "$backup_file")" > "$temporary_checksum"
+chmod 600 "$temporary_checksum"
+
+# Publish each file atomically. If the checksum sidecar cannot be published,
+# remove the just-published dump rather than leave an apparently complete backup.
 mv -- "$temporary_file" "$backup_file"
-(
-  cd -- "$backup_dir"
-  sha256sum "$(basename -- "$backup_file")" > "$(basename -- "$backup_file").sha256"
-)
-chmod 600 "$backup_file.sha256"
+if ! mv -- "$temporary_checksum" "$backup_file.sha256"; then
+  rm -f -- "$backup_file"
+  echo "Could not publish the backup checksum; removed the unverified dump." >&2
+  exit 1
+fi
 
 # Delete only this script's own old dump/checksum files; never touch unrelated files.
 find "$backup_dir" -maxdepth 1 -type f \
