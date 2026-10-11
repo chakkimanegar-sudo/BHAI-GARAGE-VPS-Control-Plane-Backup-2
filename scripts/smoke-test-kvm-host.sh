@@ -54,8 +54,6 @@ if virsh --connect qemu:///system list --all --name | grep -Fxq "$DOMAIN"; then
 fi
 
 TEMP_DIR="$(mktemp -d "$VM_DIR/.kvm-smoke.XXXXXXXX")"
-chmod 0750 "$TEMP_DIR"
-chown "$AGENT_UID:$AGENT_GID" "$TEMP_DIR"
 disk_path="$TEMP_DIR/root.qcow2"
 seed_path="$TEMP_DIR/cloud-init.iso"
 user_data_path="$TEMP_DIR/user-data"
@@ -101,6 +99,8 @@ cleanup() {
   exit "$original_status"
 }
 trap cleanup EXIT
+chmod 0750 "$TEMP_DIR"
+chown "$AGENT_UID:$AGENT_GID" "$TEMP_DIR"
 
 qemu-img create -f qcow2 -F qcow2 -b "$IMAGE_PATH" "$disk_path" 8G
 cat > "$user_data_path" <<'USERDATA'
