@@ -178,3 +178,34 @@ jobs:
 
       - name: Test API server recovery logic
         run: pnpm --filter @workspace/api-server run test
+      
+      - name: Live KVM guest boot and NAT smoke test when hardware virtualization is available
+        timeout-minutes: 25
+        run: |
+          set -Eeuo pipefail
+          if [[ "$(uname -m)" != "x86_64" || ! -e /dev/kvm ]]; then
+            echo "::notice::SKIP live KVM smoke: runner does not expose /dev/kvm on x86-64."
+            exit 0
+          fi
+          if ! grep -Eiq '(^|[[:space:]])(vmx|svm)([[:space:]]|$)' /proc/cpuinfo; then
+            echo "::notice::SKIP live KVM smoke: CPU virtualization flags are not exposed."
+            exit 0
+          fi
+          if [[ ! -r /etc/os-release ]]; then
+            echo "::notice::SKIP live KVM smoke: OS release information is unavailable."
+            exit 0
+          fi
+          # shellcheck disable=SC1091
+          . /etc/os-release
+          if [[ "${ID:-}" != "ubuntu" || "${VERSION_ID:-}" != "24.04" ]]; then
+            echo "::notice::SKIP live KVM smoke: host setup currently supports Ubuntu 24.04 only."
+            exit 0
+          fi
+
+          # This permission change is confined to the disposable GitHub-hosted runner.
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo bash scripts/prepare-kvm-host.sh --install
+          sudo bash scripts/prepare-kvm-host.sh --check
+          sudo bash scripts/smoke-test-kvm-host.sh
