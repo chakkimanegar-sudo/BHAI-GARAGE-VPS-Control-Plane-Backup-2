@@ -3,10 +3,63 @@ import { access, mkdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import type { AgentOperation, AgentOperationResult, VirtualizationProvider } from "./types.ts";
+import type { AgentOperation, AgentOperationResult, PublicNetworkConfig, VirtualizationProvider } from "./types.ts";
 import { assertVpsConfiguration, type AgentConfig } from "./config.ts";
 
 const execFile = promisify(execFileCallback);
+
+const IPV4_PATTERN = /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$/;
+const MAC_PATTERN = /^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$/i;
+
+export function isValidPublicNetworkConfig(value: unknown): value is PublicNetworkConfig {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const config = value as Record<string, unknown>;
+  if (
+    typeof config.ipAddress !== "string" || !IPV4_PATTERN.test(config.ipAddress) ||
+    typeof config.gateway !== "string" || !IPV4_PATTERN.test(config.gateway) ||
+    typeof config.macAddress !== "string" || !MAC_PATTERN.test(config.macAddress) ||
+    !Number.isInteger(config.prefixLength) || Number(config.prefixLength) < 1 || Number(config.prefixLength) > 32 ||
+    !Array.isArray(config.nameservers) || config.nameservers.length < 1 || config.nameservers.length > 4 ||
+    !config.nameservers.every((value) => typeof value === "string" && IPV4_PATTERN.test(value))
+  ) return false;
+
+  const firstMacOctet = Number.parseInt(config.macAddress.slice(0, 2), 16);
+  return Number.isFinite(firstMacOctet) && (firstMacOctet & 1) === 0;
+}
+
+export function renderCloudInitPublicNetwork(config: PublicNetworkConfig): string {
+  if (!isValidPublicNetworkConfig(config)) {
+    throw new Error("Invalid static public network configuration");
+  }
+  return [
+    "version: 2",
+    "ethernets:",
+    "  public0:",
+    "    match:",
+    "      macaddress: '" + config.macAddress.toLowerCase() + "'",
+    "    dhcp4: false",
+    "    addresses:",
+    "      - " + config.ipAddress + "/" + config.prefixLength,
+    "    routes:",
+    "      - to: 0.0.0.0/0",
+    "        via: " + config.gateway,
+    "        on-link: true",
+    "    nameservers:",
+    "      addresses:",
+    ...config.nameservers.map((address) => "        - " + address),
+    "",
+  ].join("\n");
+}
+
+export function renderBridgeInterfaceXml(bridge: string, macAddress: string): string {
+  if (!/^[A-Za-z0-9_.-]{1,15}$/.test(bridge) || !MAC_PATTERN.test(macAddress)) {
+    throw new Error("Invalid public bridge name or virtual MAC address");
+  }
+  const escapedBridge = xmlEscape(bridge);
+  const escapedMac = xmlEscape(macAddress.toLowerCase());
+  return "<interface type='bridge'><mac address='" + escapedMac + "'/><source bridge='" + escapedBridge + "'/><model type='virtio'/></interface>";
+}
+
 
 const DOMAIN_STATE_TIMEOUT_MS = 120_000;
 const DOMAIN_STATE_POLL_INTERVAL_MS = 1_000;
@@ -142,6 +195,20 @@ export class LibvirtProvider implements VirtualizationProvider {
     }
 
     await command("/bin/sh", ["-c", "command -v cloud-localds >/dev/null 2>&1"], 10_000);
+
+    if (this.config.libvirtBridge) {
+      let bridgeInfo: unknown;
+      try {
+        bridgeInfo = JSON.parse(await command("ip", ["-json", "-details", "link", "show", "dev", this.config.libvirtBridge], 10_000));
+      } catch {
+        throw new Error("Unable to inspect the configured public Linux bridge");
+      }
+      const link = Array.isArray(bridgeInfo) ? bridgeInfo[0] as Record<string, unknown> | undefined : undefined;
+      const linkInfo = link?.linkinfo as Record<string, unknown> | undefined;
+      if (linkInfo?.info_kind !== "bridge" || link?.operstate !== "UP") {
+        throw new Error("The configured public bridge must exist, be a Linux bridge, and be UP");
+      }
+    }
   }
 
   private async virsh(args: string[], timeout?: number): Promise<string> {
@@ -237,11 +304,20 @@ export class LibvirtProvider implements VirtualizationProvider {
 
   private async create(operation: AgentOperation, name: string): Promise<AgentOperationResult> {
     const vps = operation.vps;
+    const publicNetwork = operation.publicNetwork ?? null;
     if (!validSshPublicKey(operation.sshPublicKey)) {
       throw new Error("A supported SSH public key is required for real VPS provisioning");
     }
+    if (publicNetwork) {
+      if (!this.config.libvirtBridge) {
+        throw new Error("Public network requested but BHAI_LIBVIRT_BRIDGE is not configured");
+      }
+      if (!isValidPublicNetworkConfig(publicNetwork) || publicNetwork.ipAddress !== vps.ipAddress) {
+        throw new Error("The assigned public IP, prefix, gateway, DNS, or virtual MAC is invalid");
+      }
+    }
     if (await this.exists(name)) {
-      return { ipAddress: await this.findIp(name) };
+      return { ipAddress: publicNetwork?.ipAddress ?? await this.findIp(name) };
     }
 
     const baseImage = this.config.images[vps.osImage];
@@ -281,7 +357,19 @@ export class LibvirtProvider implements VirtualizationProvider {
         `local-hostname: ${vps.name}`,
         "",
       ].join("\n"), { mode: 0o600 });
-      await command("cloud-localds", [seedPath, userDataPath, metaDataPath], 30_000);
+      let cloudLocalDsArgs: string[];
+      if (publicNetwork) {
+        const networkConfigPath = path.join(instanceDirectory, "network-config");
+        await writeFile(networkConfigPath, renderCloudInitPublicNetwork(publicNetwork), { mode: 0o600 });
+        cloudLocalDsArgs = ["--network-config", networkConfigPath, seedPath, userDataPath, metaDataPath];
+      } else {
+        cloudLocalDsArgs = [seedPath, userDataPath, metaDataPath];
+      }
+      await command("cloud-localds", cloudLocalDsArgs, 30_000);
+
+      const networkInterfaceXml = publicNetwork
+        ? renderBridgeInterfaceXml(this.config.libvirtBridge!, publicNetwork.macAddress)
+        : "<interface type='network'><source network='" + xmlEscape(this.config.libvirtNetwork) + "'/><model type='virtio'/></interface>";
 
       const domainXml = [
         "<domain type='kvm'>",
@@ -299,8 +387,7 @@ export class LibvirtProvider implements VirtualizationProvider {
           `<source file='${xmlEscape(diskPath)}'/><target dev='vda' bus='virtio'/></disk>`,
         `<disk type='file' device='cdrom'><driver name='qemu' type='raw'/>` +
           `<source file='${xmlEscape(seedPath)}'/><target dev='sda' bus='sata'/><readonly/></disk>`,
-        `<interface type='network'><source network='${xmlEscape(this.config.libvirtNetwork)}'/>` +
-          "<model type='virtio'/></interface>",
+        networkInterfaceXml,
         "<console type='pty'><target type='serial' port='0'/></console>",
         "</devices>",
         "</domain>",
@@ -311,7 +398,7 @@ export class LibvirtProvider implements VirtualizationProvider {
       await this.virsh(["define", xmlPath]);
       await this.virsh(["start", name]);
       await this.waitForState(name, ["running", "idle"]);
-      return { ipAddress: await this.findIp(name) };
+      return { ipAddress: publicNetwork?.ipAddress ?? await this.findIp(name) };
     } catch (error) {
       let rollbackConfirmed = false;
       try {
