@@ -59,6 +59,11 @@ export async function verifyPassword(password: string, encoded: string): Promise
 
 type RateEntry = { count: number; resetAt: number };
 const attempts = new Map<string, RateEntry>();
+const RATE_LIMIT_CLEANUP_THRESHOLD = 2_000;
+const RATE_LIMIT_MAX_ENTRIES = 10_000;
+const RATE_LIMIT_SWEEP_INTERVAL_MS = 60_000;
+const RATE_LIMIT_FULL_SWEEP_INTERVAL_MS = 5_000;
+let lastRateLimitSweepAt = 0;
 
 export function checkRateLimit(
   key: string,
@@ -66,13 +71,34 @@ export function checkRateLimit(
   windowMs: number,
   now = Date.now(),
 ): { allowed: boolean; retryAfterSeconds: number } {
-  if (attempts.size > 2_000) {
+  const atCapacity = attempts.size >= RATE_LIMIT_MAX_ENTRIES;
+  const sweepInterval = atCapacity
+    ? RATE_LIMIT_FULL_SWEEP_INTERVAL_MS
+    : RATE_LIMIT_SWEEP_INTERVAL_MS;
+  if (
+    attempts.size > RATE_LIMIT_CLEANUP_THRESHOLD &&
+    now - lastRateLimitSweepAt >= sweepInterval
+  ) {
     for (const [entryKey, entry] of attempts) {
       if (entry.resetAt <= now) attempts.delete(entryKey);
     }
+    lastRateLimitSweepAt = now;
   }
+
   const current = attempts.get(key);
   if (!current || current.resetAt <= now) {
+    if (!current && attempts.size >= RATE_LIMIT_MAX_ENTRIES) {
+      // Keep in-memory limiter state bounded under high-cardinality requests.
+      // New buckets fail closed until expired entries can be pruned.
+      let earliestResetAt = Number.POSITIVE_INFINITY;
+      for (const entry of attempts.values()) {
+        if (entry.resetAt < earliestResetAt) earliestResetAt = entry.resetAt;
+      }
+      return {
+        allowed: false,
+        retryAfterSeconds: Math.max(1, Math.ceil((earliestResetAt - now) / 1000)),
+      };
+    }
     attempts.set(key, { count: 1, resetAt: now + windowMs });
     return { allowed: true, retryAfterSeconds: 0 };
   }
