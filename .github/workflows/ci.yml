@@ -67,6 +67,7 @@ jobs:
         run: |
           docker compose --profile libvirt --profile public config --quiet
           docker compose --profile libvirt --profile public config --format json > "$RUNNER_TEMP/bhai-garage-compose.json"
+          env -u BHAI_DOMAIN docker compose config --quiet
           docker run --rm -e BHAI_DOMAIN=garage-ci.example.test -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
           node - "$RUNNER_TEMP/bhai-garage-compose.json" <<'NODE'
           const fs = require("node:fs");
