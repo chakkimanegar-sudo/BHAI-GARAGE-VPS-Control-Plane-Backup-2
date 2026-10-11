@@ -68,8 +68,16 @@ function setSessionCookie(res: Response, token: string): void {
   });
 }
 
-function authRateLimit(req: Request, res: Response, bucket: string, limit: number): boolean {
-  const result = checkRateLimit(`${bucket}:${req.ip ?? "unknown"}`, limit, 15 * 60 * 1000);
+function authRateLimit(
+  req: Request,
+  res: Response,
+  bucket: string,
+  limit: number,
+  identity?: string,
+): boolean {
+  // Account-specific buckets must not depend on the proxy's shared internal IP.
+  const key = identity === undefined ? `${bucket}:${req.ip ?? "unknown"}` : `${bucket}:${identity}`;
+  const result = checkRateLimit(key, limit, 15 * 60 * 1000);
   if (result.allowed) return true;
   res.setHeader("Retry-After", String(result.retryAfterSeconds));
   res.status(429).json({ error: "Too many attempts. Wait before trying again." });
@@ -136,12 +144,13 @@ router.post("/auth/setup", async (req, res): Promise<void> => {
 });
 
 router.post("/auth/login", async (req, res): Promise<void> => {
-  if (!authRateLimit(req, res, "login", 8)) return;
   const parsed = LoginAdminBody.safeParse(req.body);
   if (!parsed.success) {
+    if (!authRateLimit(req, res, "login-invalid", 30)) return;
     res.status(400).json({ error: "Provide a valid email and password." });
     return;
   }
+  if (!authRateLimit(req, res, "login", 8, parsed.data.email.toLowerCase())) return;
 
   const [account] = await db
     .select()
