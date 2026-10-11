@@ -214,7 +214,8 @@ test("libvirt outages and unconfirmed rollback preserve VPS storage", async () =
     await assert.rejects(provider.execute(operation("create")));
     assert.equal(await readFile(disk, "utf8"), "keep this VPS disk");
     assert.equal(await readFile(stateFile, "utf8").then(() => true, () => false), true);
-    assert.notEqual((await stat(instanceDirectory)).mode & 0o001, 0, "libvirt-qemu must be able to traverse the instance directory");
+    const instanceMode = (await stat(instanceDirectory)).mode & 0o7777;
+    assert.equal(instanceMode, 0o2710, "VPS directory must provide private setgid traversal through the QEMU group");
     assert.equal((await readFile(path.join(instanceDirectory, "user-data"), "utf8")).includes("ssh_authorized_keys"), true);
   } finally {
     process.env.PATH = originalPath;
