@@ -67,6 +67,48 @@ pass() {
   printf 'PASS: %s\n' "$*"
 }
 
+fetch_verified_manifest() {
+  local temp_dir="$1"
+  for file in SHA256SUMS SHA256SUMS.gpg; do
+    curl --fail --location --retry 3 --connect-timeout 15 --max-time 120 \
+      --silent --show-error "$IMAGE_URL/$file" --output "$temp_dir/$file"
+  done
+
+  local keyring="/usr/share/keyrings/ubuntu-cloudimage-keyring.gpg"
+  [[ -s "$keyring" ]] || keyring="/etc/apt/trusted.gpg.d/ubuntu-keyring-2012-cdimage.gpg"
+  [[ -s "$keyring" ]] || fail "Ubuntu cloud-image signing keyring is missing."
+
+  gpgv --keyring "$keyring" "$temp_dir/SHA256SUMS.gpg" "$temp_dir/SHA256SUMS"
+  grep -Fq "  $IMAGE_FILE" "$temp_dir/SHA256SUMS" ||
+    fail "Official SHA256SUMS has no entry for $IMAGE_FILE."
+}
+
+verify_image_checksum_record() {
+  local image_dir="$1"
+  local image_file="$2"
+  local record="$3"
+  [[ -f "$record" && ! -L "$record" ]] ||
+    fail "Trusted cloud-image checksum record missing or unsafe: $record"
+
+  local digest recorded_file extra
+  read -r digest recorded_file extra < "$record" ||
+    fail "Cloud-image checksum record is empty: $record"
+  [[ "$digest" =~ ^[[:xdigit:]]{64}$ && "$recorded_file" == "$image_file" && -z "${extra:-}" ]] ||
+    fail "Cloud-image checksum record has an invalid format: $record"
+
+  (cd "$image_dir" && sha256sum --check --status "$record") ||
+    fail "Cloud image checksum verification failed: $image_dir/$image_file"
+}
+
+write_image_checksum_record() {
+  local image_dir="$1"
+  local image_file="$2"
+  local record="$3"
+  local temp_record="$4"
+  (cd "$image_dir" && sha256sum "$image_file") > "$temp_record"
+  install -o root -g root -m 0444 "$temp_record" "$record"
+}
+
 IMAGE_DIR="${BHAI_IMAGE_DIR:-/var/lib/bhai-garage/images}"
 VM_DIR="${BHAI_VM_DIR:-/var/lib/bhai-garage/vms}"
 AGENT_UID="${BHAI_AGENT_UID:-1000}"
@@ -126,31 +168,42 @@ if [[ "$MODE" == "install" ]]; then
   install -d -o "$AGENT_UID" -g "$AGENT_GID" -m 0750 "$VM_DIR"
 
   IMAGE_PATH="$IMAGE_DIR/$IMAGE_FILE"
-  if [[ ! -e "$IMAGE_PATH" ]]; then
-    temp_dir="$(mktemp -d)"
-    trap 'rm -rf -- "$temp_dir"' EXIT
-    for file in SHA256SUMS SHA256SUMS.gpg "$IMAGE_FILE"; do
-      curl --fail --location --retry 3 --connect-timeout 15 --max-time 900 \
-        --silent --show-error "$IMAGE_URL/$file" --output "$temp_dir/$file"
-    done
-
-    keyring="/usr/share/keyrings/ubuntu-cloudimage-keyring.gpg"
-    [[ -s "$keyring" ]] || keyring="/etc/apt/trusted.gpg.d/ubuntu-keyring-2012-cdimage.gpg"
-    [[ -s "$keyring" ]] || fail "Ubuntu cloud-image signing keyring is missing."
-
-    gpgv --keyring "$keyring" "$temp_dir/SHA256SUMS.gpg" "$temp_dir/SHA256SUMS"
-    grep -Fq "  $IMAGE_FILE" "$temp_dir/SHA256SUMS" ||
-      fail "Official SHA256SUMS has no entry for $IMAGE_FILE."
-    checksum_output="$(cd "$temp_dir" && sha256sum --check --ignore-missing SHA256SUMS)"
-    printf '%s\n' "$checksum_output" | grep -Fxq "$IMAGE_FILE: OK" ||
-      fail "Ubuntu cloud image did not match its signed SHA-256 checksum."
-
-    install -o root -g root -m 0644 "$temp_dir/$IMAGE_FILE" "$IMAGE_PATH"
-    rm -rf -- "$temp_dir"
-    trap - EXIT
-  else
+  CHECKSUM_PATH="$IMAGE_PATH.sha256"
+  if [[ -e "$IMAGE_PATH" ]]; then
     qemu-img info --output=json "$IMAGE_PATH" | grep -Eq '"format"[[:space:]]*:[[:space:]]*"qcow2"' ||
       fail "Existing image path is not a valid QCOW2 file: $IMAGE_PATH"
+
+    if [[ -f "$CHECKSUM_PATH" ]]; then
+      # The record is created root-owned only after the image matches Canonical's
+      # signed release manifest; recheck it before every host preflight.
+      verify_image_checksum_record "$IMAGE_DIR" "$IMAGE_FILE" "$CHECKSUM_PATH"
+    else
+      # Migrate an image installed by an older version only if it still matches
+      # the current Canonical-signed manifest. Never bless an unverified cache.
+      temp_dir="$(mktemp -d)"
+      trap 'rm -rf -- "$temp_dir"' EXIT
+      fetch_verified_manifest "$temp_dir"
+      checksum_output="$(cd "$IMAGE_DIR" && sha256sum --check --ignore-missing "$temp_dir/SHA256SUMS")"
+      printf '%s\n' "$checksum_output" | grep -Fxq "$IMAGE_FILE: OK" ||
+        fail "Existing cloud image has no trusted checksum record and does not match the signed current release; preserve any VM disks and investigate before replacing it."
+      write_image_checksum_record "$IMAGE_DIR" "$IMAGE_FILE" "$CHECKSUM_PATH" "$temp_dir/image.sha256"
+      rm -rf -- "$temp_dir"
+      trap - EXIT
+    fi
+  else
+    temp_dir="$(mktemp -d)"
+    trap 'rm -rf -- "$temp_dir"' EXIT
+    fetch_verified_manifest "$temp_dir"
+    curl --fail --location --retry 3 --connect-timeout 15 --max-time 900 \
+      --silent --show-error "$IMAGE_URL/$IMAGE_FILE" --output "$temp_dir/$IMAGE_FILE"
+    checksum_output="$(cd "$temp_dir" && sha256sum --check --ignore-missing SHA256SUMS)"
+    printf '%s\n' "$checksum_output" | grep -Fxq "$IMAGE_FILE: OK" ||
+      fail "Ubuntu cloud image did not match Canonical's signed SHA-256 checksum."
+
+    install -o root -g root -m 0644 "$temp_dir/$IMAGE_FILE" "$IMAGE_PATH"
+    write_image_checksum_record "$IMAGE_DIR" "$IMAGE_FILE" "$CHECKSUM_PATH" "$temp_dir/image.sha256"
+    rm -rf -- "$temp_dir"
+    trap - EXIT
   fi
   pass "libvirt packages, default NAT network, storage, and signed Ubuntu image prepared."
 fi
@@ -179,8 +232,10 @@ grep -Eq "mode=.?nat" <<<"$network_xml" ||
 pass "libvirt KVM guest support and active default NAT network verified."
 
 IMAGE_PATH="$(host_path "$IMAGE_DIR")/$IMAGE_FILE"
+CHECKSUM_PATH="$IMAGE_PATH.sha256"
 [[ -d "$(host_path "$IMAGE_DIR")" ]] || fail "Image directory missing: $IMAGE_DIR"
 [[ -r "$IMAGE_PATH" ]] || fail "Verified cloud image missing: $IMAGE_PATH (run --install)."
+verify_image_checksum_record "$(dirname "$IMAGE_PATH")" "$IMAGE_FILE" "$CHECKSUM_PATH"
 image_metadata="$(qemu-img info --output=json "$IMAGE_PATH")" ||
   fail "qemu-img cannot read the Ubuntu cloud image."
 grep -Eq '"format"[[:space:]]*:[[:space:]]*"qcow2"' <<<"$image_metadata" ||
@@ -190,7 +245,7 @@ VM_PATH="$(host_path "$VM_DIR")"
 vm_owner="$(stat -c '%u' "$VM_PATH")"
 [[ "$vm_owner" == "$AGENT_UID" ]] ||
   fail "VM storage owner UID is $vm_owner; Docker host-agent runs as UID $AGENT_UID. Run --install or fix ownership."
-pass "Ubuntu QCOW2 image and writable VM storage verified."
+pass "Ubuntu QCOW2 image integrity and writable VM storage verified."
 pass "cloud-localds is available for cloud-init SSH-key provisioning."
 
 note "For Compose, map BHAI_IMAGE_DIR=$IMAGE_DIR and BHAI_VM_DIR=$VM_DIR."
