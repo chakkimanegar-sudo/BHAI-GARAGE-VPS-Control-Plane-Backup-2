@@ -71,6 +71,7 @@ services:
       BHAI_IMAGES_JSON: "${BHAI_IMAGES_JSON:-}"
       BHAI_VM_STORAGE: /var/lib/bhai-garage/vms
       BHAI_LIBVIRT_NETWORK: ${BHAI_LIBVIRT_NETWORK:-default}
+      BHAI_LIBVIRT_BRIDGE: ${BHAI_LIBVIRT_BRIDGE:-}
       BHAI_HOSTNAME: ${BHAI_HOSTNAME:-}
     volumes:
       - /var/run/libvirt/libvirt-sock:/var/run/libvirt/libvirt-sock
