@@ -19,7 +19,7 @@ OS_RELEASE
 printf 'processor flags : fpu vmx sse sse2\n' > "$test_root/proc/cpuinfo"
 : > "$test_root/dev/kvm"
 printf 'mock qcow2 image\n' > "$image_dir/noble-server-cloudimg-amd64.img"
-sha256sum "$image_dir/noble-server-cloudimg-amd64.img" > "$image_dir/noble-server-cloudimg-amd64.img.sha256"
+(cd "$image_dir" && sha256sum "noble-server-cloudimg-amd64.img") > "$image_dir/noble-server-cloudimg-amd64.img.sha256"
 
 cat > "$fake_bin/virsh" <<'FAKE_VIRSH'
 #!/usr/bin/env bash
