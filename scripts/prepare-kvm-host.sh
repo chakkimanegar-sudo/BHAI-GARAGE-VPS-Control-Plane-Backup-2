@@ -8,7 +8,7 @@ readonly CONTAINER_IMAGE_DIR="/var/lib/bhai-garage/images"
 readonly CONTAINER_VM_DIR="/var/lib/bhai-garage/vms"
 
 MODE="check"
-case "\${1:---check}" in
+case "${1:---check}" in
   --check) MODE="check" ;;
   --install) MODE="install" ;;
   --help|-h)
@@ -39,7 +39,7 @@ if [[ $# -gt 1 ]]; then
   exit 2
 fi
 
-TEST_ROOT="\${BHAI_KVM_HOST_TEST_ROOT:-}"
+TEST_ROOT="${BHAI_KVM_HOST_TEST_ROOT:-}"
 if [[ -n "$TEST_ROOT" ]]; then
   if [[ "$MODE" != "check" || ! -d "$TEST_ROOT" ]]; then
     echo "BHAI_KVM_HOST_TEST_ROOT is only supported for read-only tests." >&2
@@ -50,7 +50,7 @@ fi
 host_path() {
   local value="$1"
   if [[ -n "$TEST_ROOT" ]]; then
-    printf '%s%s' "\${TEST_ROOT%/}" "$value"
+    printf '%s%s' "${TEST_ROOT%/}" "$value"
   else
     printf '%s' "$value"
   fi
@@ -69,10 +69,10 @@ pass() {
   printf 'PASS: %s\n' "$*"
 }
 
-IMAGE_DIR="\${BHAI_IMAGE_DIR:-/var/lib/bhai-garage/images}"
-VM_DIR="\${BHAI_VM_DIR:-/var/lib/bhai-garage/vms}"
-AGENT_UID="\${BHAI_AGENT_UID:-1000}"
-AGENT_GID="\${BHAI_AGENT_GID:-1000}"
+IMAGE_DIR="${BHAI_IMAGE_DIR:-/var/lib/bhai-garage/images}"
+VM_DIR="${BHAI_VM_DIR:-/var/lib/bhai-garage/vms}"
+AGENT_UID="${BHAI_AGENT_UID:-1000}"
+AGENT_GID="${BHAI_AGENT_GID:-1000}"
 OS_RELEASE="$(host_path /etc/os-release)"
 CPU_INFO="$(host_path /proc/cpuinfo)"
 KVM_DEVICE="$(host_path /dev/kvm)"
@@ -83,8 +83,8 @@ KVM_DEVICE="$(host_path /dev/kvm)"
 [[ -r "$OS_RELEASE" ]] || fail "Cannot read /etc/os-release."
 # shellcheck disable=SC1090
 . "$OS_RELEASE"
-[[ "\${ID:-}" == "ubuntu" && "\${VERSION_ID:-}" == "24.04" ]] ||
-  fail "Use Ubuntu Server 24.04 LTS on the physical host. Detected \${PRETTY_NAME:-unknown OS}."
+[[ "${ID:-}" == "ubuntu" && "${VERSION_ID:-}" == "24.04" ]] ||
+  fail "Use Ubuntu Server 24.04 LTS on the physical host. Detected ${PRETTY_NAME:-unknown OS}."
 [[ "$(uname -m)" == "x86_64" ]] ||
   fail "This host needs the x86_64/AMD64 architecture."
 
