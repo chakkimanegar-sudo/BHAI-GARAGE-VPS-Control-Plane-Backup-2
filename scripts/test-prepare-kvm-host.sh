@@ -10,7 +10,9 @@ fake_bin="$temporary_root/bin"
 image_dir="$test_root/var/lib/libvirt/images/bhai-garage-base"
 vm_dir="$test_root/var/lib/libvirt/images/bhai-garage-vms"
 mkdir -p "$fake_bin" "$image_dir" "$vm_dir" "$test_root/etc" "$test_root/proc" "$test_root/dev"
-chmod 0750 "$vm_dir"
+existing_vps_dir="$vm_dir/bg-00000000000040008000000000000002"
+mkdir -p "$existing_vps_dir"
+chmod 0750 "$vm_dir" "$existing_vps_dir"
 
 cat > "$test_root/etc/os-release" <<'OS_RELEASE'
 ID=ubuntu
@@ -63,6 +65,22 @@ if bash "$root/scripts/prepare-kvm-host.sh" --check >"$temporary_root/no-qemu-se
 fi
 grep -Fq 'must grant search-only access to libvirt-qemu' "$temporary_root/no-qemu-search.out"
 chmod 0711 "$vm_dir"
+
+# Existing per-VPS directories need the same traversal bit as their parent.
+if bash "$root/scripts/prepare-kvm-host.sh" --check >"$temporary_root/no-vps-search.out" 2>&1; then
+  echo "Host preflight unexpectedly accepted a VPS directory without QEMU search access." >&2
+  exit 1
+fi
+grep -Fq 'Existing VM directory is not searchable by libvirt-qemu' "$temporary_root/no-vps-search.out"
+chmod 0711 "$existing_vps_dir"
+
+# A custom path outside libvirt's standard image tree is rejected rather than
+# silently creating a guest that AppArmor cannot access.
+if BHAI_VM_DIR=/var/lib/bhai-garage/vms bash "$root/scripts/prepare-kvm-host.sh" --check >"$temporary_root/custom-path.out" 2>&1; then
+  echo "Host preflight unexpectedly accepted a custom VM directory outside libvirt's image tree." >&2
+  exit 1
+fi
+grep -Fq 'BHAI_VM_DIR must be a child of /var/lib/libvirt/images' "$temporary_root/custom-path.out"
 
 # Production provisioning must use the stable released image stream, not daily builds.
 grep -Fq 'readonly IMAGE_URL="https://cloud-images.ubuntu.com/releases/noble/release"' "$root/scripts/prepare-kvm-host.sh"
