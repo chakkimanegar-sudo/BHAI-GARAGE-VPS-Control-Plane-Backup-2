@@ -152,6 +152,15 @@ export interface VpsCreateInput {
   hostId?: string | null;
   /** @maxLength 8192 */
   sshPublicKey?: string;
+  publicNetwork?: {
+    ipAddress: string;
+    /** @minimum 1 @maximum 32 */
+    prefixLength: number;
+    gateway: string;
+    macAddress: string;
+    /** @minItems 1 @maxItems 4 */
+    nameservers: string[];
+  };
 }
 
 export type VpsActionInputAction = typeof VpsActionInputAction[keyof typeof VpsActionInputAction];
@@ -324,6 +333,16 @@ export interface AgentOperation {
   vps: VpsInstance;
   /** @nullable */
   sshPublicKey?: string | null;
+  /** @nullable */
+  publicNetwork?: {
+    ipAddress: string;
+    /** @minimum 1 @maximum 32 */
+    prefixLength: number;
+    gateway: string;
+    macAddress: string;
+    /** @minItems 1 @maxItems 4 */
+    nameservers: string[];
+  } | null;
 }
 
 export interface AgentClaimResult {

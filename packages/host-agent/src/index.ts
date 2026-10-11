@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { readConfig } from "./config.ts";
-import { LibvirtProvider } from "./libvirt-provider.ts";
+import { isValidPublicNetworkConfig, LibvirtProvider } from "./libvirt-provider.ts";
 import { HostMetricsCollector } from "./metrics.ts";
 import type { AgentOperation } from "./types.ts";
 
@@ -62,9 +62,14 @@ function parseOperation(value: unknown): AgentOperation | null {
     typeof candidate.osImage !== "string" ||
     typeof candidate.vcpus !== "number" ||
     typeof candidate.memoryMb !== "number" ||
-    typeof candidate.diskGb !== "number"
+    typeof candidate.diskGb !== "number" ||
+    (candidate.ipAddress !== null && typeof candidate.ipAddress !== "string")
   ) return null;
   if (data.sshPublicKey !== null && typeof data.sshPublicKey !== "string") return null;
+  if (data.publicNetwork !== undefined && data.publicNetwork !== null) {
+    if (!isValidPublicNetworkConfig(data.publicNetwork)) return null;
+    if (candidate.ipAddress !== data.publicNetwork.ipAddress) return null;
+  }
   return data as unknown as AgentOperation;
 }
 

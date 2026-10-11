@@ -92,6 +92,27 @@ test("admin API validation rejects invalid allocations and writes real persisten
   });
   assert.equal(invalid.status, 400);
 
+  const publicNetworkInSimulation = await fetch(`${apiBase}/vps`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie },
+    body: JSON.stringify({
+      name: `public-sim-${randomUUID().slice(0, 8)}`,
+      osImage: "ubuntu-24.04",
+      vcpus: 2,
+      memoryMb: 2048,
+      diskGb: 20,
+      sshPublicKey: "ssh-ed25519 AAAA test",
+      publicNetwork: {
+        ipAddress: "203.0.113.10",
+        prefixLength: 32,
+        gateway: "192.0.2.1",
+        macAddress: "02:00:00:00:00:10",
+        nameservers: ["1.1.1.1"],
+      },
+    }),
+  });
+  assert.equal(publicNetworkInSimulation.status, 400);
+
   const created = await fetch(`${apiBase}/vps`, {
     method: "POST",
     headers: { "content-type": "application/json", cookie },

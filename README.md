@@ -103,9 +103,13 @@ BHAI_AGENT_GID=1000
 LIBVIRT_GID=replace_with_numeric_group_id
 ```
 
+The optional public guest network is configured per VPS at creation time in the dashboard. Only enter a provider-assigned public IPv4 address, prefix length, gateway, nameservers, and provider-issued virtual MAC. To use it, configure and verify a provider-compatible Linux bridge on the KVM host, then set `BHAI_LIBVIRT_BRIDGE` to that existing bridge in the host-agent environment. The agent preflight checks the bridge exists, is a Linux bridge, and is UP before accepting host work. It does not create the bridge or modify Netplan/firewall rules. Leave all public-network fields empty to use the default NAT/DHCP network.
+
+This feature adds `vps_instances.public_network` and unique public IPv4/virtual-MAC indexes. Before deploying the updated API to an existing database, take a backup, run the documented database schema push, and verify readiness before enabling public networking. Do not guess or reuse an IP or virtual MAC, and do not set public-network details unless the provider has routed/assigned them to this physical server.
+
 Do not switch `BHAI_PROVISIONER=libvirt` until the control plane has registered the host and it reports a fresh successful heartbeat.
 
-**Networking boundary:** this helper only prepares libvirt's default NAT network for guest outbound connectivity. It intentionally does not alter host firewalls or public interfaces. The current host-agent domain XML does not yet allocate a public IP per VPS, assign provider-specific virtual MAC addresses, or create inbound port-forward rules; therefore public guest ingress remains an integration blocker even after host preflight passes. For example, OVHcloud documents a provider-specific Additional IP + virtual-MAC bridge workflow, whose availability depends on the exact server range: [virtual MAC for Additional IPs](https://docs.ovhcloud.com/en/guides/bare-metal-cloud/dedicated-servers/network-virtual-mac) and [bridged guest networking](https://docs.ovhcloud.com/en/guides/bare-metal-cloud/dedicated-servers/network-bridging). These steps require real IPs allocated to your account and must be validated against the purchased server. Keep management ports private, preserve SSH access, and only expose ports allowed by the host/provider firewall policy.
+**Networking boundary:** the helper prepares only libvirt's default NAT network and deliberately does not change host firewall rules or the physical public interface. The control plane now accepts an optional static public network tuple per real VPS (provider-assigned IPv4, prefix, gateway, DNS IPv4s, and the provider-issued virtual MAC). When these fields are supplied, the host agent uses cloud-init static networking and attaches that VM to an already configured Linux bridge named by `BHAI_LIBVIRT_BRIDGE`. Leave all fields blank for NAT/DHCP. Never invent an IP or virtual MAC. The provider must actually route the address to the server, and the assigned virtual MAC must match the provider portal. For example, OVHcloud documents product-dependent Additional IP virtual MAC assignment and bridged guest networking: [virtual MAC for Additional IPs](https://docs.ovhcloud.com/en/guides/bare-metal-cloud/dedicated-servers/network-virtual-mac) and [bridged guest networking](https://docs.ovhcloud.com/en/guides/bare-metal-cloud/dedicated-servers/network-bridging). Prepare the bridge using the provider's current instructions before enabling `BHAI_LIBVIRT_BRIDGE`; this automated helper intentionally does not edit Netplan, firewall rules, or public host networking because mistakes can lock out SSH. Public ingress and guest egress must still be smoke-tested on the purchased server.
 
 ## Connect a Linux KVM/libvirt host
 
@@ -122,6 +126,8 @@ Real provisioning requires a Linux machine you control or rent, with hardware vi
    BHAI_IMAGES_JSON='{"ubuntu-24.04":"/var/lib/bhai-garage/images/ubuntu-24.04.qcow2","debian-12":"/var/lib/bhai-garage/images/debian-12.qcow2"}'
    BHAI_VM_STORAGE=/var/lib/bhai-garage/vms
    BHAI_LIBVIRT_NETWORK=default
+# Set only after a provider-compatible Linux bridge exists and is UP on the host.
+BHAI_LIBVIRT_BRIDGE=br-ex
    ```
 
    Protect the agent environment file with owner-only permissions. Add the service user to the host's libvirt socket group, and grant it write access only to the VM storage directory.

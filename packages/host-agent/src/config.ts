@@ -9,6 +9,7 @@ export interface AgentConfig {
   storageDirectory: string;
   libvirtUri: string;
   libvirtNetwork: string;
+  libvirtBridge?: string | null;
   images: Partial<Record<OsImage, string>>;
   pollIntervalMs: number;
 }
@@ -66,6 +67,11 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
     throw new Error("BHAI_LIBVIRT_NETWORK contains unsupported characters");
   }
 
+  const libvirtBridge = env.BHAI_LIBVIRT_BRIDGE?.trim() || null;
+  if (libvirtBridge && !/^[A-Za-z0-9_.-]{1,15}$/.test(libvirtBridge)) {
+    throw new Error("BHAI_LIBVIRT_BRIDGE must be a valid Linux interface name (1–15 characters)");
+  }
+
   const libvirtUri = env.LIBVIRT_URI ?? "qemu:///system";
   if (libvirtUri !== "qemu:///system") {
     throw new Error("Only the local qemu:///system libvirt socket is supported");
@@ -83,6 +89,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
     storageDirectory: path.resolve(env.BHAI_VM_STORAGE ?? "/var/lib/bhai-garage/vms"),
     libvirtUri,
     libvirtNetwork,
+    libvirtBridge,
     images,
     pollIntervalMs: pollMs,
   };

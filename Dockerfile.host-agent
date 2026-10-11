@@ -1,6 +1,6 @@
 FROM node:24-bookworm-slim
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends libvirt-clients qemu-utils cloud-image-utils \
+  && apt-get install -y --no-install-recommends libvirt-clients qemu-utils cloud-image-utils iproute2 \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY packages/host-agent/src ./src

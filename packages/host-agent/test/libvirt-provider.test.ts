@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { LibvirtProvider } from "../src/libvirt-provider.ts";
+import { isValidPublicNetworkConfig, LibvirtProvider, renderBridgeInterfaceXml, renderCloudInitPublicNetwork } from "../src/libvirt-provider.ts";
 import { HostMetricsCollector } from "../src/metrics.ts";
 import type { AgentConfig } from "../src/config.ts";
 import type { AgentOperation } from "../src/types.ts";
@@ -43,6 +43,30 @@ async function executable(file: string, contents: string): Promise<void> {
   await writeFile(file, contents, { mode: 0o700 });
   await chmod(file, 0o700);
 }
+
+test("static public network config renders a safe cloud-init bridge and rejects invalid values", () => {
+  const publicNetwork = {
+    ipAddress: "203.0.113.10",
+    prefixLength: 32,
+    gateway: "192.0.2.1",
+    macAddress: "02:00:00:00:00:10",
+    nameservers: ["1.1.1.1", "8.8.8.8"],
+  };
+  assert.equal(isValidPublicNetworkConfig(publicNetwork), true);
+  const networkYaml = renderCloudInitPublicNetwork(publicNetwork);
+  assert.match(networkYaml, /macaddress: '02:00:00:00:00:10'/);
+  assert.match(networkYaml, /- 203\.0\.113\.10\/32/);
+  assert.match(networkYaml, /via: 192\.0\.2\.1/);
+  assert.match(networkYaml, /on-link: true/);
+  assert.match(networkYaml, /- 1\.1\.1\.1/);
+  const xml = renderBridgeInterfaceXml("br-ex", publicNetwork.macAddress);
+  assert.match(xml, /interface type='bridge'/);
+  assert.match(xml, /source bridge='br-ex'/);
+  assert.match(xml, /mac address='02:00:00:00:00:10'/);
+  assert.equal(isValidPublicNetworkConfig({ ...publicNetwork, macAddress: "01:00:00:00:00:10" }), false);
+  assert.equal(isValidPublicNetworkConfig({ ...publicNetwork, ipAddress: "not-an-ip" }), false);
+  assert.throws(() => renderBridgeInterfaceXml("bridge-name-that-is-too-long", publicNetwork.macAddress), /Invalid public bridge/);
+});
 
 test("libvirt outages and unconfirmed rollback preserve VPS storage", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "bhai-garage-libvirt-test-"));

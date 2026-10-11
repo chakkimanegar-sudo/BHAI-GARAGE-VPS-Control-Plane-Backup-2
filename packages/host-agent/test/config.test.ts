@@ -11,6 +11,15 @@ test("host-agent config requires HTTPS unless using the internal Docker network"
   };
   assert.equal(readConfig(base).apiUrl.protocol, "https:");
   assert.equal(readConfig(base).hostname, "kvm-01");
+  assert.equal(readConfig({ ...base, BHAI_LIBVIRT_BRIDGE: "br-ex" }).libvirtBridge, "br-ex");
+  assert.throws(
+    () => readConfig({ ...base, BHAI_LIBVIRT_BRIDGE: "bridge-name-is-too-long" }),
+    /valid Linux interface name/,
+  );
+  assert.throws(
+    () => readConfig({ ...base, BHAI_LIBVIRT_BRIDGE: "br-ex; reboot" }),
+    /valid Linux interface name/,
+  );
   assert.throws(
     () => readConfig({ ...base, BHAI_API_URL: "http://garage.example.com/api" }),
     /must use HTTPS/,
