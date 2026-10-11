@@ -31,6 +31,9 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Typecheck and build workspace
+        env:
+          PORT: "5000"
+          BASE_PATH: "/"
         run: pnpm run build
 
       - name: Test host agent
