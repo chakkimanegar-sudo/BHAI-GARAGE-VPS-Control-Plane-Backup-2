@@ -60,6 +60,8 @@ jobs:
           SESSION_SECRET: ci-compose-session-secret-741c2bda9034e8fb
           BHAI_SETUP_TOKEN: ci-compose-setup-token-d8203af17c64ab95
           BHAI_AGENT_TOKEN: ci-compose-agent-token-2371fa904cb685de
+          BHAI_IMAGE_DIR: /var/lib/libvirt/images/ci-bhai-garage-images
+          BHAI_VM_DIR: /var/lib/libvirt/images/ci-bhai-garage-vms
         run: |
           docker compose config --quiet
           docker compose config --format json > "$RUNNER_TEMP/bhai-garage-compose.json"
@@ -75,7 +77,20 @@ jobs:
           if ((config.services?.db?.ports ?? []).length > 0) {
             throw new Error("PostgreSQL must not publish a host port");
           }
-          console.log("Web/API listeners are loopback-only; PostgreSQL has no published host port.");
+          const agent = config.services?.["host-agent"];
+          const volumes = agent?.volumes ?? [];
+          const mountTargets = volumes.map((volume) => typeof volume === "string"
+            ? volume.split(":")[1]
+            : volume.target);
+          if (agent?.environment?.BHAI_IMAGE_DIRECTORY !== process.env.BHAI_IMAGE_DIR ||
+              !mountTargets.includes(process.env.BHAI_IMAGE_DIR)) {
+            throw new Error("Host-agent image root must match its image mount destination exactly");
+          }
+          if (agent?.environment?.BHAI_VM_STORAGE !== process.env.BHAI_VM_DIR ||
+              !mountTargets.includes(process.env.BHAI_VM_DIR)) {
+            throw new Error("Host-agent VM storage must match its VM mount destination exactly");
+          }
+          console.log("Web/API are loopback-only; PostgreSQL is private; KVM image and VM paths match their mounts.");
           NODE
 
       - name: Build API, web, and host-agent container images
