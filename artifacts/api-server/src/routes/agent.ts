@@ -73,7 +73,9 @@ router.post("/agent/operations/next", requireHostAgent, async (_req, res): Promi
             operationId: row.id,
             operationAction: row.action,
             attempts: row.attempts,
-            error: "Host operation exceeded the retry limit without a completion result.",
+            previousStatus: typeof row.payload?.previousStatus === "string" ? row.payload.previousStatus : null,
+            outcome: "unknown_after_retry_limit",
+            error: "Host operation exceeded the retry limit without a completion result; manual VM reconciliation is required.",
           },
         });
       }
