@@ -21,5 +21,5 @@ test("an exhausted lifecycle operation restores its recorded stopped state", () 
 test("untrusted or missing prior state fails closed", () => {
   assert.equal(exhaustedOperationStatus("restart", null), "failed");
   assert.equal(exhaustedOperationStatus("delete", { previousStatus: "provisioning" }), "failed");
-  assert.equal(exhaustedOperationStatus("unknown-action", { previousStatus: "running" }), "running");
+  assert.equal(exhaustedOperationStatus("unknown-action", { previousStatus: "running" }), "failed");
 });
