@@ -27,11 +27,20 @@ export interface VpsInstance {
   updatedAt: string;
 }
 
+export interface PublicNetworkConfig {
+  ipAddress: string;
+  prefixLength: number;
+  gateway: string;
+  macAddress: string;
+  nameservers: string[];
+}
+
 export interface AgentOperation {
   id: string;
   action: AgentAction;
   vps: VpsInstance;
   sshPublicKey: string | null;
+  publicNetwork?: PublicNetworkConfig | null;
 }
 
 export interface HostMetrics {
