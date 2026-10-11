@@ -38,7 +38,11 @@ function validSshPublicKey(value: string | null): value is string {
 }
 
 export class LibvirtProvider implements VirtualizationProvider {
-  constructor(private readonly config: AgentConfig) {}
+  private readonly config: AgentConfig;
+
+  constructor(config: AgentConfig) {
+    this.config = config;
+  }
 
   private async virsh(args: string[], timeout?: number): Promise<string> {
     return command("virsh", ["--connect", this.config.libvirtUri, ...args], timeout);
