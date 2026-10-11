@@ -121,13 +121,16 @@ jobs:
           echo "Docker Compose web, API liveness, and database readiness smoke checks passed."
 
       - name: Check backup script syntax
-        run: bash -n scripts/backup-db.sh scripts/restore-db.sh scripts/test-db-backup.sh scripts/prepare-kvm-host.sh scripts/test-prepare-kvm-host.sh
+        run: bash -n scripts/backup-db.sh scripts/restore-db.sh scripts/test-db-backup.sh scripts/prepare-kvm-host.sh scripts/test-prepare-kvm-host.sh scripts/smoke-test-kvm-host.sh
 
       - name: Test backup rotation and restore safety
         run: bash scripts/test-db-backup.sh
 
       - name: Test KVM host preparation and preflight
         run: bash scripts/test-prepare-kvm-host.sh
+
+      - name: Validate opt-in live KVM smoke-test CLI
+        run: bash scripts/smoke-test-kvm-host.sh --help
 
       - name: Test host agent
         run: pnpm --filter @workspace/host-agent run test
