@@ -174,6 +174,133 @@ test("VPS lifecycle actions persist, audit, and delete correctly in simulation",
   createdVpsId = null;
 });
 
+test("provider-assigned public network persists and reaches a claimed real-host operation", async () => {
+  const previousProvisioner = process.env.BHAI_PROVISIONER;
+  const hostName = `public-network-${randomUUID().slice(0, 8)}`;
+  const vpsName = `public-vps-${randomUUID().slice(0, 8)}`;
+  const publicNetwork = {
+    ipAddress: "203.0.113.10",
+    prefixLength: 32,
+    gateway: "192.0.2.1",
+    macAddress: "02:00:00:00:00:10",
+    nameservers: ["1.1.1.1", "8.8.8.8"],
+  };
+  let hostId: string | null = null;
+  let publicVpsId: string | null = null;
+
+  process.env.BHAI_PROVISIONER = "libvirt";
+  try {
+    const registered = await fetch(`${apiBase}/hosts`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ name: hostName }),
+    });
+    assert.equal(registered.status, 201);
+    const registeredBody = await registered.json() as {
+      host: { id: string };
+      agentToken: string;
+    };
+    hostId = registeredBody.host.id;
+    const agentToken = registeredBody.agentToken;
+
+    const heartbeat = await fetch(`${apiBase}/agent/heartbeat`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${agentToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        hostname: "mocked-kvm-host",
+        agentVersion: "ci-test",
+        totalVcpus: 8,
+        cpuUsagePercent: 0,
+        totalMemoryMb: 32768,
+        usedMemoryMb: 1024,
+        diskTotalGb: 500,
+        diskUsedGb: 10,
+        networkRxMbps: 0,
+        networkTxMbps: 0,
+      }),
+    });
+    assert.equal(heartbeat.status, 200);
+
+    const created = await fetch(`${apiBase}/vps`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        name: vpsName,
+        osImage: "ubuntu-24.04",
+        vcpus: 2,
+        memoryMb: 2048,
+        diskGb: 20,
+        hostId,
+        sshPublicKey: "ssh-ed25519 AAAA ci-test",
+        publicNetwork,
+      }),
+    });
+    assert.equal(created.status, 201);
+    const createdBody = await created.json() as {
+      vps: { id: string; status: string; provider: string; ipAddress: string | null };
+      queued: boolean;
+      simulation: boolean;
+    };
+    publicVpsId = createdBody.vps.id;
+    assert.equal(createdBody.vps.status, "provisioning");
+    assert.equal(createdBody.vps.provider, "libvirt");
+    assert.equal(createdBody.vps.ipAddress, publicNetwork.ipAddress);
+    assert.equal(createdBody.queued, true);
+    assert.equal(createdBody.simulation, false);
+
+    const [stored] = await db.select().from(vpsInstances).where(eq(vpsInstances.id, publicVpsId));
+    assert.deepEqual(stored?.publicNetwork, publicNetwork);
+    assert.equal(stored?.ipAddress, publicNetwork.ipAddress);
+
+    const duplicateIp = await fetch(`${apiBase}/vps`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        name: `duplicate-${randomUUID().slice(0, 8)}`,
+        osImage: "ubuntu-24.04",
+        vcpus: 1,
+        memoryMb: 1024,
+        diskGb: 10,
+        hostId,
+        sshPublicKey: "ssh-ed25519 AAAA ci-test",
+        publicNetwork,
+      }),
+    });
+    assert.equal(duplicateIp.status, 409);
+
+    const claim = await fetch(`${apiBase}/agent/operations/next`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${agentToken}` },
+    });
+    assert.equal(claim.status, 200);
+    const claimBody = await claim.json() as {
+      operation: {
+        vps: { id: string; ipAddress: string | null };
+        publicNetwork: typeof publicNetwork | null;
+      } | null;
+    };
+    assert.equal(claimBody.operation?.vps.id, publicVpsId);
+    assert.equal(claimBody.operation?.vps.ipAddress, publicNetwork.ipAddress);
+    assert.deepEqual(claimBody.operation?.publicNetwork, publicNetwork);
+  } finally {
+    if (hostId) {
+      await db.delete(agentOperations).where(eq(agentOperations.hostId, hostId));
+    }
+    if (publicVpsId) {
+      await db.delete(vpsInstances).where(eq(vpsInstances.id, publicVpsId));
+      await db.delete(auditEvents).where(eq(auditEvents.resourceId, publicVpsId));
+    }
+    if (hostId) {
+      await db.delete(auditEvents).where(eq(auditEvents.resourceId, hostId));
+      await db.delete(hosts).where(eq(hosts.id, hostId));
+    }
+    process.env.BHAI_PROVISIONER = previousProvisioner ?? "simulation";
+  }
+});
+
 test("logout revokes the persisted session", async () => {
   const logout = await fetch(`${apiBase}/auth/logout`, {
     method: "POST",
