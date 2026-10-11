@@ -1,5 +1,6 @@
 import { execFile as execFileCallback } from "node:child_process";
-import { mkdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { AgentOperation, AgentOperationResult, VirtualizationProvider } from "./types.ts";
@@ -42,6 +43,60 @@ export class LibvirtProvider implements VirtualizationProvider {
 
   constructor(config: AgentConfig) {
     this.config = config;
+  }
+
+  async checkReady(): Promise<void> {
+    const configuredImages = Object.entries(this.config.images)
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].length > 0);
+    if (configuredImages.length === 0) {
+      throw new Error("At least one supported QCOW2 cloud image must be configured");
+    }
+
+    await access(this.config.storageDirectory, fsConstants.W_OK);
+    const uri = (await this.virsh(["uri"], 10_000)).trim();
+    if (uri !== this.config.libvirtUri) {
+      throw new Error("The configured local libvirt connection is not available");
+    }
+
+    const capabilities = await this.virsh(["capabilities"], 10_000);
+    const hostSection = capabilities.split("<host>", 2)[1]?.split("</host>", 1)[0] ?? "";
+    const hostArchitecture = hostSection.includes("<arch>x86_64</arch>") ? "x86_64" : "";
+    const x86Guest = (
+      capabilities.split("<arch name='x86_64'", 2)[1]?.split("</arch>", 1)[0] ??
+      capabilities.split('<arch name="x86_64"', 2)[1]?.split("</arch>", 1)[0] ??
+      ""
+    );
+    const hasKvm = x86Guest.includes("type='kvm'") || x86Guest.includes('type="kvm"');
+    if (hostArchitecture !== "x86_64" || !hasKvm) {
+      throw new Error("This host must expose x86_64 KVM acceleration for VPS guests");
+    }
+
+    const networkInfo = await this.virsh(["net-info", this.config.libvirtNetwork], 10_000);
+    if (!networkInfo.split("\n").some((line) => line.trim() === "Active: yes")) {
+      throw new Error(`The configured libvirt network "${this.config.libvirtNetwork}" must be active`);
+    }
+
+    const imageRoot = await realpath(this.config.imageDirectory);
+    for (const [imageId, imagePath] of configuredImages) {
+      const resolvedImage = await realpath(imagePath);
+      if (!resolvedImage.startsWith(`${imageRoot}${path.sep}`)) {
+        throw new Error(`Cloud image "${imageId}" must stay inside BHAI_IMAGE_DIRECTORY`);
+      }
+      if (!(await stat(resolvedImage)).isFile()) {
+        throw new Error(`Cloud image "${imageId}" is not a regular file`);
+      }
+      let metadata: { format?: unknown };
+      try {
+        metadata = JSON.parse(await command("qemu-img", ["info", "--output=json", resolvedImage], 15_000)) as { format?: unknown };
+      } catch {
+        throw new Error(`Cloud image "${imageId}" could not be read by qemu-img`);
+      }
+      if (metadata.format !== "qcow2") {
+        throw new Error(`Cloud image "${imageId}" must be in QCOW2 format`);
+      }
+    }
+
+    await command("/bin/sh", ["-c", "command -v cloud-localds >/dev/null 2>&1"], 10_000);
   }
 
   private async virsh(args: string[], timeout?: number): Promise<string> {

@@ -78,6 +78,8 @@ test("libvirt outages and unconfirmed rollback preserve VPS storage", async () =
     await executable(path.join(bin, "virsh"), "#!/bin/sh\nexit 1\n");
     const provider = new LibvirtProvider(config);
     assert.ok(new HostMetricsCollector(config));
+    await assert.rejects(provider.checkReady());
+    await assert.rejects(new LibvirtProvider({ ...config, images: {} }).checkReady(), /At least one supported QCOW2 cloud image/);
     await assert.rejects(provider.execute(operation("delete")));
     assert.equal(await readFile(disk, "utf8"), "keep this VPS disk");
 
@@ -87,6 +89,9 @@ test("libvirt outages and unconfirmed rollback preserve VPS storage", async () =
     await executable(path.join(bin, "virsh"), [
       "#!/bin/sh",
       'case "$3" in',
+      '  uri) echo "qemu:///system"; exit 0 ;;',
+      "  capabilities) printf \"<capabilities><host><cpu><arch>x86_64</arch></cpu></host><guest><arch name='x86_64'><domain type='kvm'></domain></arch></guest></capabilities>\\n\"; exit 0 ;;",
+      '  net-info) printf "Name: default\\nActive: yes\\n"; exit 0 ;;',
       '  list) if [ -f "' + stateFile + '" ]; then echo "' + DOMAIN + '"; fi; exit 0 ;;',
       '  define) touch "' + stateFile + '"; exit 0 ;;',
       '  domstate) echo "shut off"; exit 0 ;;',
@@ -95,9 +100,18 @@ test("libvirt outages and unconfirmed rollback preserve VPS storage", async () =
       "esac",
       "",
     ].join("\n"));
-    await executable(path.join(bin, "qemu-img"), '#!/bin/sh\ntouch "$8"\nexit 0\n');
+    await executable(path.join(bin, "qemu-img"), [
+      "#!/bin/sh",
+      'case "$1" in',
+      '  info) echo \'{"format":"qcow2"}\'; exit 0 ;;',
+      '  create) touch "$8"; exit 0 ;;',
+      '  *) exit 0 ;;',
+      "esac",
+      "",
+    ].join("\n"));
     await executable(path.join(bin, "cloud-localds"), '#!/bin/sh\ntouch "$1"\nexit 0\n');
 
+    await provider.checkReady();
     await assert.rejects(provider.execute(operation("create")));
     assert.equal(await readFile(disk, "utf8"), "keep this VPS disk");
     assert.equal(await readFile(stateFile, "utf8").then(() => true, () => false), true);
