@@ -17,7 +17,7 @@ Safety:
 USAGE
 }
 
-fail() { printf 'FAIL: %s\\n' "$*" >&2; exit 1; }
+fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   usage
@@ -130,5 +130,5 @@ mv -- "$temporary_dir" "$final_dir"
 temporary_dir=""
 trap - EXIT
 
-printf 'VPS disk backup created: %s\\n' "$final_dir"
-printf 'Verify with: cd %q && sha256sum --check SHA256SUMS\\n' "$final_dir"
+printf 'VPS disk backup created: %s\n' "$final_dir"
+printf 'Verify with: cd %q && sha256sum --check SHA256SUMS\n' "$final_dir"
