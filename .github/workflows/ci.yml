@@ -100,6 +100,7 @@ jobs:
           SESSION_SECRET: ci-compose-session-secret-741c2bda9034e8fb
           BHAI_SETUP_TOKEN: ci-compose-setup-token-d8203af17c64ab95
           BHAI_AGENT_TOKEN: ci-compose-agent-token-2371fa904cb685de
+          BHAI_QEMU_GID: "640"
         run: docker compose build api web host-agent
 
       - name: Smoke test the complete Docker Compose stack
@@ -108,6 +109,7 @@ jobs:
           SESSION_SECRET: ci-compose-session-secret-741c2bda9034e8fb
           BHAI_SETUP_TOKEN: ci-compose-setup-token-d8203af17c64ab95
           BHAI_AGENT_TOKEN: ci-compose-agent-token-2371fa904cb685de
+          BHAI_QEMU_GID: "640"
         run: |
           set -Eeuo pipefail
           trap 'docker compose down --volumes --remove-orphans' EXIT
