@@ -8,9 +8,13 @@ test("host-agent config requires HTTPS unless using the internal Docker network"
     BHAI_AGENT_TOKEN: "x".repeat(48),
     BHAI_API_URL: "https://garage.example.com/api",
     BHAI_HOSTNAME: "kvm-01",
+    BHAI_QEMU_GID: "640",
   };
   assert.equal(readConfig(base).apiUrl.protocol, "https:");
   assert.equal(readConfig(base).hostname, "kvm-01");
+  assert.equal(readConfig(base).qemuGid, 640);
+  assert.throws(() => readConfig({ ...base, BHAI_QEMU_GID: "" }), /BHAI_QEMU_GID must be set/);
+  assert.throws(() => readConfig({ ...base, BHAI_QEMU_GID: "libvirt-qemu" }), /BHAI_QEMU_GID must be set/);
   assert.equal(readConfig({ ...base, BHAI_LIBVIRT_BRIDGE: "br-ex" }).libvirtBridge, "br-ex");
   assert.throws(
     () => readConfig({ ...base, BHAI_LIBVIRT_BRIDGE: "bridge-name-is-too-long" }),
