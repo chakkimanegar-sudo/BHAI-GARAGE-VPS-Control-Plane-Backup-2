@@ -80,7 +80,7 @@ The API workflow uses port 5000 and the web artifact uses Vite. Set `BHAI_SETUP_
 
 ## Prepare a real KVM host
 
-The host preparation helper supports **Ubuntu Server 24.04 LTS on x86-64 bare metal**. It installs KVM/libvirt/QEMU tools, activates libvirt's default NAT network, creates the host image/VM storage directories, and downloads Canonical's Ubuntu 24.04 AMD64 cloud image only after verifying the signed SHA-256 manifest.
+The host preparation helper supports **Ubuntu Server 24.04 LTS on x86-64 bare metal**. It installs KVM/libvirt/QEMU tools, activates libvirt's default NAT network, creates the host image/VM storage directories, and downloads Canonical's stable Ubuntu 24.04 AMD64 released cloud image (not a daily build) only after verifying the signed SHA-256 manifest.
 
 Run on the **new Linux host** from this repository checkout:
 
@@ -126,8 +126,8 @@ Real provisioning requires a Linux machine you control or rent, with hardware vi
    BHAI_IMAGES_JSON='{"ubuntu-24.04":"/var/lib/bhai-garage/images/ubuntu-24.04.qcow2","debian-12":"/var/lib/bhai-garage/images/debian-12.qcow2"}'
    BHAI_VM_STORAGE=/var/lib/bhai-garage/vms
    BHAI_LIBVIRT_NETWORK=default
-# Set only after a provider-compatible Linux bridge exists and is UP on the host.
-BHAI_LIBVIRT_BRIDGE=br-ex
+# Optional; uncomment only after a provider-compatible Linux bridge exists and is UP.
+# BHAI_LIBVIRT_BRIDGE=br-ex
    ```
 
    Protect the agent environment file with owner-only permissions. Add the service user to the host's libvirt socket group, and grant it write access only to the VM storage directory.
