@@ -89,16 +89,16 @@ sudo bash scripts/prepare-kvm-host.sh --install
 sudo bash scripts/prepare-kvm-host.sh --check
 ```
 
-The install mode requires root and may install packages and activate the libvirt default network. It verifies the Ubuntu cloud image against Canonical's signed SHA-256 manifest and stores a root-owned checksum record. The read-only check mode verifies that record and fails closed if the cached image has changed or its verification record is missing. For hosts prepared by an older version, run `--install` once to validate and record the cached image; if it is not the current signed release, investigate before replacing it, especially when VM disks depend on that base image. The check also fails if the host does not expose CPU virtualization and `/dev/kvm`, if libvirt cannot provide an x86-64 KVM guest, or if storage/network are not ready. It does not create any VM.
+The install mode requires root and may install packages and activate the libvirt default network. It stores base images and per-VPS disks below libvirt's standard `/var/lib/libvirt/images` tree so Ubuntu's default per-guest AppArmor policy can authorize the exact paths. The shared VM root and each VPS directory use search-only access (`o+x`) for non-owners because system QEMU runs as the unprivileged `libvirt-qemu` user; this grants neither directory listing nor write access. Re-run `--install` after upgrades to repair this one directory bit on managed `bg-*` folders without changing guest disk files. Custom paths outside the standard tree are rejected by this helper unless a separately reviewed AppArmor policy is configured. It verifies the Ubuntu cloud image against Canonical's signed SHA-256 manifest and stores a root-owned checksum record. The read-only check mode verifies that record and fails closed if the cached image has changed or its verification record is missing. For hosts prepared by an older version, run `--install` once to validate and record the cached image; if it is not the current signed release, investigate before replacing it, especially when VM disks depend on that base image. The check also fails if the host does not expose CPU virtualization and `/dev/kvm`, if libvirt cannot provide an x86-64 KVM guest, or if storage/network are not ready. It does not create any VM.
 
 After preflight passes, run `sudo bash scripts/smoke-test-kvm-host.sh` on the actual KVM host. This opt-in live test creates a uniquely named temporary 1-vCPU/1-GiB Ubuntu guest on the default private NAT network, waits up to five minutes for a DHCP lease, and then undefines the test guest and removes its temporary files. It does not modify the public interface, firewall rules, or existing VM domains. If cleanup cannot be confirmed, it preserves the temporary files and reports the domain/path for manual recovery. The regular hosted CI checks this command's syntax/help only; it does not pretend to boot a VM without a real host.
 
 For the Compose host-agent, configure the host-side image and VM directories, the image map inside the container, and the numeric group ID of the libvirt socket. Starting values after running the helper are:
 
 ```sh
-BHAI_IMAGE_DIR=/var/lib/bhai-garage/images
-BHAI_VM_DIR=/var/lib/bhai-garage/vms
-BHAI_IMAGES_JSON='{"ubuntu-24.04":"/var/lib/bhai-garage/images/noble-server-cloudimg-amd64.img"}'
+BHAI_IMAGE_DIR=/var/lib/libvirt/images/bhai-garage-base
+BHAI_VM_DIR=/var/lib/libvirt/images/bhai-garage-vms
+BHAI_IMAGES_JSON='{"ubuntu-24.04":"/var/lib/libvirt/images/bhai-garage-base/noble-server-cloudimg-amd64.img"}'
 BHAI_AGENT_UID=1000
 BHAI_AGENT_GID=1000
 # Replace with output of: stat -c %g /var/run/libvirt/libvirt-sock
@@ -125,8 +125,8 @@ Real provisioning requires a Linux machine you control or rent, with hardware vi
    ```sh
    BHAI_API_URL=https://garage.example.com/api
    BHAI_AGENT_TOKEN=<paste-the-one-time-host-token>
-   BHAI_IMAGES_JSON='{"ubuntu-24.04":"/var/lib/bhai-garage/images/ubuntu-24.04.qcow2","debian-12":"/var/lib/bhai-garage/images/debian-12.qcow2"}'
-   BHAI_VM_STORAGE=/var/lib/bhai-garage/vms
+   BHAI_IMAGES_JSON='{"ubuntu-24.04":"/var/lib/libvirt/images/bhai-garage-base/ubuntu-24.04.qcow2","debian-12":"/var/lib/libvirt/images/bhai-garage-base/debian-12.qcow2"}'
+   BHAI_VM_STORAGE=/var/lib/libvirt/images/bhai-garage-vms
    BHAI_LIBVIRT_NETWORK=default
 # Optional; uncomment only after a provider-compatible Linux bridge exists and is UP.
 # BHAI_LIBVIRT_BRIDGE=br-ex
@@ -149,12 +149,12 @@ Real provisioning requires a Linux machine you control or rent, with hardware vi
 
    **Operation recovery and uncertain state:** an operation that reaches the retry limit without a completion response is marked `failed`, and an `agent.operation.exhausted` audit event records its action, attempt count, and last recorded state. This deliberately avoids guessing whether a VM action completed before the response was lost. Before retrying or deleting that VPS, inspect its domain with `virsh --connect qemu:///system list --all` and reconcile the actual VM and disk state manually.
 
-   For a local Docker Compose KVM host, save the one-time token in `.env`, set the image map to container paths under `/var/lib/bhai-garage/images`, set `LIBVIRT_GID` to the host socket's actual group ID, set `BHAI_HOSTNAME` to the physical host's name, and run `docker compose --profile libvirt up -d --build host-agent`. The agent uses host networking for accurate interface metrics and reaches the API through a loopback-only port. It mounts the libvirt socket, read-only images, and configured VM data directory; it does not mount the Docker socket or host root.
+   For a local Docker Compose KVM host, save the one-time token in `.env`, set the image map to container paths under `/var/lib/libvirt/images/bhai-garage-base`, set `LIBVIRT_GID` to the host socket's actual group ID, set `BHAI_HOSTNAME` to the physical host's name, and run `docker compose --profile libvirt up -d --build host-agent`. The agent uses host networking for accurate interface metrics and reaches the API through a loopback-only port. It mounts the libvirt socket, read-only images, and configured VM data directory; it does not mount the Docker socket or host root.
 6. Wait for a fresh heartbeat, switch `BHAI_PROVISIONER=libvirt`, and restart the API. Create real VPS instances with a valid SSH public key. Requests are queued and only the host assigned to that token can claim them.
 
 The agent sets vCPU and RAM in libvirt domain definitions and creates a QCOW2 overlay with the requested virtual capacity. Images must be cloud-init compatible. The configured virtual network must provide guest connectivity and DHCP leases for IP reporting. Confirm CPU architecture, image format, disk capacity, bridge/firewall policy, inbound SSH reachability, and guest initialization on your own host before offering the service to anyone.
 
-**Real VM creation has not been tested here.** This development environment has no connected KVM/libvirt host, compatible base images, guest network, or public address allocation. Simulation is the only provider verified in this workspace.
+**Live-host requirement:** CI validates the smoke-test script and host-agent unit tests but does not boot a real guest. After `--install` and `--check` pass on the actual host, run `sudo bash scripts/smoke-test-kvm-host.sh`. Require a real guest boot plus private NAT DHCP lease before switching the control plane to real provisioning. No compatible KVM host is connected to this development environment, so that hardware-level proof remains outstanding.
 
 ## API overview
 

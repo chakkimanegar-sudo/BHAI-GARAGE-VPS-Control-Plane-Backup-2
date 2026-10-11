@@ -1,5 +1,5 @@
 import { execFile as execFileCallback } from "node:child_process";
-import { access, mkdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -347,7 +347,11 @@ export class LibvirtProvider implements VirtualizationProvider {
     const seedPath = path.join(instanceDirectory, "cloud-init.iso");
     const userDataPath = path.join(instanceDirectory, "user-data");
     const metaDataPath = path.join(instanceDirectory, "meta-data");
-    await mkdir(instanceDirectory, { recursive: true, mode: 0o750 });
+    await mkdir(instanceDirectory, { recursive: true, mode: 0o711 });
+      // System QEMU runs as libvirt-qemu, not as the host-agent UID. Grant only
+      // search/traverse access so QEMU can reach the exact disk path; do not
+      // grant other users permission to list or write this customer's directory.
+      await chmod(instanceDirectory, 0o711);
 
     try {
       await command("qemu-img", [

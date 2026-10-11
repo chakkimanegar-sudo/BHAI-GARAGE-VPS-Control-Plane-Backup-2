@@ -69,14 +69,14 @@ services:
       BHAI_API_URL: http://127.0.0.1:${BHAI_API_LOCAL_PORT:-5000}/api
       BHAI_AGENT_TOKEN: ${BHAI_AGENT_TOKEN:-}
       BHAI_IMAGES_JSON: "${BHAI_IMAGES_JSON:-}"
-      BHAI_VM_STORAGE: /var/lib/bhai-garage/vms
+      BHAI_VM_STORAGE: ${BHAI_VM_DIR:-/var/lib/libvirt/images/bhai-garage-vms}
       BHAI_LIBVIRT_NETWORK: ${BHAI_LIBVIRT_NETWORK:-default}
       BHAI_LIBVIRT_BRIDGE: ${BHAI_LIBVIRT_BRIDGE:-}
       BHAI_HOSTNAME: ${BHAI_HOSTNAME:-}
     volumes:
       - /var/run/libvirt/libvirt-sock:/var/run/libvirt/libvirt-sock
-      - ${BHAI_IMAGE_DIR:-./images}:/var/lib/bhai-garage/images:ro
-      - ${BHAI_VM_DIR:-./vms}:/var/lib/bhai-garage/vms
+      - ${BHAI_IMAGE_DIR:-/var/lib/libvirt/images/bhai-garage-base}:${BHAI_IMAGE_DIR:-/var/lib/libvirt/images/bhai-garage-base}:ro
+      - ${BHAI_VM_DIR:-/var/lib/libvirt/images/bhai-garage-vms}:${BHAI_VM_DIR:-/var/lib/libvirt/images/bhai-garage-vms}
     network_mode: host
     depends_on:
       api:

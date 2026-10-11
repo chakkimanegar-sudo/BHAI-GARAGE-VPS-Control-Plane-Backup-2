@@ -26,8 +26,8 @@ note() { printf 'INFO: %s\n' "$*"; }
 
 [[ "$EUID" -eq 0 ]] || fail "Run this live host test as root so it can use qemu:///system and clean up the temporary guest."
 ROOT_DIR="$(cd -- "$(dirname -- "$0")/.." && pwd)"
-IMAGE_DIR="${BHAI_IMAGE_DIR:-/var/lib/bhai-garage/images}"
-VM_DIR="${BHAI_VM_DIR:-/var/lib/bhai-garage/vms}"
+IMAGE_DIR="${BHAI_IMAGE_DIR:-/var/lib/libvirt/images/bhai-garage-base}"
+VM_DIR="${BHAI_VM_DIR:-/var/lib/libvirt/images/bhai-garage-vms}"
 AGENT_UID="${BHAI_AGENT_UID:-1000}"
 AGENT_GID="${BHAI_AGENT_GID:-1000}"
 IMAGE_FILE="noble-server-cloudimg-amd64.img"
@@ -99,7 +99,8 @@ cleanup() {
   exit "$original_status"
 }
 trap cleanup EXIT
-chmod 0750 "$TEMP_DIR"
+# Let system QEMU traverse the private temporary directory; no listing/writing.
+chmod 0711 "$TEMP_DIR"
 chown "$AGENT_UID:$AGENT_GID" "$TEMP_DIR"
 
 qemu-img create -f qcow2 -F qcow2 -b "$IMAGE_PATH" "$disk_path" 8G
