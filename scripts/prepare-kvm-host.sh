@@ -133,6 +133,17 @@ case "$VM_DIR" in "$LIBVIRT_IMAGE_ROOT"/*) ;; *)
   fail "BHAI_VM_DIR must be a child of $LIBVIRT_IMAGE_ROOT for the default libvirt AppArmor policy."
   ;;
 esac
+IMAGE_DIR_NAME="${IMAGE_DIR#"$LIBVIRT_IMAGE_ROOT"/}"
+VM_DIR_NAME="${VM_DIR#"$LIBVIRT_IMAGE_ROOT"/}"
+[[ -n "$IMAGE_DIR_NAME" && "$IMAGE_DIR_NAME" != */* ]] ||
+  fail "BHAI_IMAGE_DIR must be a direct child of $LIBVIRT_IMAGE_ROOT."
+[[ -n "$VM_DIR_NAME" && "$VM_DIR_NAME" != */* ]] ||
+  fail "BHAI_VM_DIR must be a direct child of $LIBVIRT_IMAGE_ROOT."
+LIBVIRT_ROOT_CONFIG_PATH="$(host_path "$LIBVIRT_IMAGE_ROOT")"
+IMAGE_DIR_CONFIG_PATH="$(host_path "$IMAGE_DIR")"
+VM_DIR_CONFIG_PATH="$(host_path "$VM_DIR")"
+[[ ! -L "$LIBVIRT_ROOT_CONFIG_PATH" && ! -L "$IMAGE_DIR_CONFIG_PATH" && ! -L "$VM_DIR_CONFIG_PATH" ]] ||
+  fail "Libvirt image root, BHAI_IMAGE_DIR, and BHAI_VM_DIR must not be symlinks."
 
 [[ -r "$OS_RELEASE" ]] || fail "Cannot read /etc/os-release."
 # shellcheck disable=SC1090
