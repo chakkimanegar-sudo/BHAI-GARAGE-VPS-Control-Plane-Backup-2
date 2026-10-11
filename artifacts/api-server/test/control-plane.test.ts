@@ -51,7 +51,21 @@ after(async () => {
   await pool.end();
 });
 
-test("login issues an HttpOnly admin session and rejects wrong credentials", async () => {
+test("login rate limits are isolated by email instead of the shared reverse-proxy IP", async () => {
+  const throttledEmail = `rate-limit-${randomUUID().slice(0, 8)}@example.invalid`;
+  const attempts: number[] = [];
+  for (let attempt = 0; attempt < 9; attempt += 1) {
+    const response = await fetch(`${apiBase}/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: throttledEmail, password: "incorrect" }),
+    });
+    attempts.push(response.status);
+  }
+  assert.deepEqual(attempts.slice(0, 8), Array(8).fill(401));
+  assert.equal(attempts[8], 429);
+
+  // A bad login burst against another address must not block the real admin.
   const wrongPassword = await fetch(`${apiBase}/auth/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
