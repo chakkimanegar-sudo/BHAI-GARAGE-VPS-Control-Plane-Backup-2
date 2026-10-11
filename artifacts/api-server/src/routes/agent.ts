@@ -123,6 +123,7 @@ router.post("/agent/operations/next", requireHostAgent, async (_req, res): Promi
     sshPublicKey: typeof claimed.payload?.sshPublicKey === "string"
       ? claimed.payload.sshPublicKey
       : null,
+    publicNetwork: instance.publicNetwork ?? null,
   };
   res.json(ClaimAgentOperationResponse.parse({ operation }));
 });
