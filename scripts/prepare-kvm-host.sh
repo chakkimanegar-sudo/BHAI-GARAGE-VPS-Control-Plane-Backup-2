@@ -172,7 +172,11 @@ network_info="$(virsh --connect qemu:///system net-info default)" ||
   fail "The libvirt default network is not defined."
 grep -Eq '^[[:space:]]*Active:[[:space:]]+yes' <<<"$network_info" ||
   fail "The libvirt default network is not active."
-pass "libvirt KVM guest support and active default network verified."
+network_xml="$(virsh --connect qemu:///system net-dumpxml default)" ||
+  fail "Unable to inspect the libvirt default network."
+grep -Eq "mode=.?nat" <<<"$network_xml" ||
+  fail "The default libvirt network is not configured for NAT; refusing to assume guest connectivity."
+pass "libvirt KVM guest support and active default NAT network verified."
 
 IMAGE_PATH="$(host_path "$IMAGE_DIR")/$IMAGE_FILE"
 [[ -d "$(host_path "$IMAGE_DIR")" ]] || fail "Image directory missing: $IMAGE_DIR"
