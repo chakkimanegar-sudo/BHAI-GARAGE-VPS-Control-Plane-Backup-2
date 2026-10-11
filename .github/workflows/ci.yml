@@ -56,19 +56,53 @@ jobs:
 
       - name: Validate Docker Compose deployment configuration
         env:
-          POSTGRES_PASSWORD: ci-compose-password-0123456789
-          SESSION_SECRET: ci-compose-session-secret-not-for-production-0123456789
-          BHAI_SETUP_TOKEN: ci-compose-setup-token-not-for-production-0123456789
-          BHAI_AGENT_TOKEN: ci-compose-agent-token-not-for-production-0123456789
+          POSTGRES_PASSWORD: ci_compose_pw_741c2bda9034e8fb
+          SESSION_SECRET: ci-compose-session-secret-741c2bda9034e8fb
+          BHAI_SETUP_TOKEN: ci-compose-setup-token-d8203af17c64ab95
+          BHAI_AGENT_TOKEN: ci-compose-agent-token-2371fa904cb685de
         run: docker compose config --quiet
 
       - name: Build API, web, and host-agent container images
         env:
-          POSTGRES_PASSWORD: ci-compose-password-0123456789
-          SESSION_SECRET: ci-compose-session-secret-not-for-production-0123456789
-          BHAI_SETUP_TOKEN: ci-compose-setup-token-not-for-production-0123456789
-          BHAI_AGENT_TOKEN: ci-compose-agent-token-not-for-production-0123456789
+          POSTGRES_PASSWORD: ci_compose_pw_741c2bda9034e8fb
+          SESSION_SECRET: ci-compose-session-secret-741c2bda9034e8fb
+          BHAI_SETUP_TOKEN: ci-compose-setup-token-d8203af17c64ab95
+          BHAI_AGENT_TOKEN: ci-compose-agent-token-2371fa904cb685de
         run: docker compose build api web host-agent
+
+      - name: Smoke test the complete Docker Compose stack
+        env:
+          POSTGRES_PASSWORD: ci_compose_pw_741c2bda9034e8fb
+          SESSION_SECRET: ci-compose-session-secret-741c2bda9034e8fb
+          BHAI_SETUP_TOKEN: ci-compose-setup-token-d8203af17c64ab95
+          BHAI_AGENT_TOKEN: ci-compose-agent-token-2371fa904cb685de
+        run: |
+          set -Eeuo pipefail
+          trap 'docker compose down --volumes --remove-orphans' EXIT
+          docker compose up -d db
+          docker compose run --no-build --rm api pnpm --filter @workspace/db run push
+          docker compose up -d --no-build api web
+
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8080/healthz -o /dev/null &&
+               curl --fail --silent http://127.0.0.1:8080/readyz -o /dev/null &&
+               curl --fail --silent http://127.0.0.1:8080/ -o /dev/null; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+
+          if [[ "$ready" != "1" ]]; then
+            docker compose ps
+            docker compose logs --no-color db api web
+            exit 1
+          fi
+
+          curl --fail --silent --show-error http://127.0.0.1:8080/healthz
+          curl --fail --silent --show-error http://127.0.0.1:8080/readyz
+          echo "Docker Compose web, API liveness, and database readiness smoke checks passed."
 
       - name: Check backup script syntax
         run: bash -n scripts/backup-db.sh scripts/restore-db.sh scripts/test-db-backup.sh scripts/prepare-kvm-host.sh scripts/test-prepare-kvm-host.sh
