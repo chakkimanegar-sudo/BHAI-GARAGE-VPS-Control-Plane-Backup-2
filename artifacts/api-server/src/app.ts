@@ -6,6 +6,10 @@ import { logger } from "./lib/logger";
 
 const app: Express = express();
 
+// The supported ingress is one internal Nginx hop. Public Caddy traffic is
+// sanitized there before the forwarded headers reach this API.
+app.set("trust proxy", 1);
+
 app.use(
   pinoHttp({
     logger,
