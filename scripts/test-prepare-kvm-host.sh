@@ -55,7 +55,7 @@ export BHAI_AGENT_GID="$(id -g)"
 
 check_output="$(bash "$root/scripts/prepare-kvm-host.sh" --check)"
 grep -Fq 'PASS: Ubuntu 24.04 x86_64 host exposes CPU virtualization and /dev/kvm.' <<<"$check_output"
-grep -Fq 'PASS: libvirt KVM guest support and active default network verified.' <<<"$check_output"
+grep -Fq 'PASS: libvirt KVM guest support and active default NAT network verified.' <<<"$check_output"
 grep -Fq 'PASS: KVM host preflight passed.' <<<"$check_output"
 grep -Fq 'does not assign public IPs to guests' <<<"$check_output"
 
