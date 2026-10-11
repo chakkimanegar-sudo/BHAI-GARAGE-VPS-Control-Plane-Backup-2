@@ -8,12 +8,13 @@ import type { AgentConfig } from "../src/config.ts";
 import type { AgentOperation } from "../src/types.ts";
 
 const VPS_ID = "00000000-0000-4000-8000-000000000002";
+const DOMAIN = `bg-${VPS_ID.replaceAll("-", "").toLowerCase()}`;
 
 function operation(action: AgentOperation["action"]): AgentOperation {
   return {
     id: "00000000-0000-4000-8000-000000000001",
     action,
-    sshPublicKey: null,
+    sshPublicKey: action === "create" ? "ssh-ed25519 AAAA ci-test" : null,
     vps: {
       id: VPS_ID,
       name: "lifecycle-vps",
@@ -126,3 +127,67 @@ test("start, stop and restart wait for verified libvirt lifecycle states", async
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("retried create verifies an existing domain and restarts a shut-off guest", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "bhai-garage-create-retry-test-"));
+  const originalPath = process.env.PATH;
+  const bin = path.join(root, "bin");
+  const stateFile = path.join(root, "domain-state");
+  const logFile = path.join(root, "actions.log");
+
+  const config: AgentConfig = {
+    apiUrl: new URL("https://garage.example.invalid/api"),
+    token: "x".repeat(48),
+    hostname: "test-host",
+    imageDirectory: path.join(root, "images"),
+    storageDirectory: path.join(root, "vms"),
+    libvirtUri: "qemu:///system",
+    libvirtNetwork: "default",
+    images: {},
+    pollIntervalMs: 5000,
+  };
+
+  try {
+    await mkdir(bin, { recursive: true });
+    await mkdir(config.storageDirectory, { recursive: true });
+    await writeFile(stateFile, "shut off\n");
+    await writeFile(logFile, "");
+    await executable(path.join(bin, "virsh"), [
+      "#!/bin/sh",
+      'case "$3" in',
+      '  list) echo "' + DOMAIN + '"; exit 0 ;;',
+      '  domstate) cat "' + stateFile + '"; exit 0 ;;',
+      '  start) printf "running\\n" > "' + stateFile + '"; printf "start\\n" >> "' + logFile + '"; exit 0 ;;',
+      '  domifaddr) exit 1 ;;',
+      '  *) echo "unexpected command: $*" >&2; exit 90 ;;',
+      "esac",
+      "",
+    ].join("\n"));
+    process.env.PATH = bin + ":" + (originalPath ?? "/usr/bin:/bin");
+
+    const provider = new LibvirtProvider(config);
+
+    // A prior create may have succeeded even when the control plane lost the
+    // completion response. Retry must restore a shut-off existing guest.
+    await provider.execute(operation("create"));
+    assert.equal((await readFile(stateFile, "utf8")).trim(), "running");
+    assert.equal(await readFile(logFile, "utf8"), "start\n");
+
+    // When the already-existing guest is running, a retry is idempotent.
+    await provider.execute(operation("create"));
+    assert.equal(await readFile(logFile, "utf8"), "start\n");
+
+    // Ambiguous/active states such as paused must never be reported as a
+    // successful create without reconciliation.
+    await writeFile(stateFile, "paused\n");
+    await assert.rejects(
+      provider.execute(operation("create")),
+      /Existing VPS domain state cannot be safely reconciled/,
+    );
+    assert.equal((await readFile(stateFile, "utf8")).trim(), "paused");
+  } finally {
+    process.env.PATH = originalPath;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+

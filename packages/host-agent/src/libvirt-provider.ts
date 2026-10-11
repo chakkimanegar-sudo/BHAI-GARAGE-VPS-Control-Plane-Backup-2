@@ -317,6 +317,16 @@ export class LibvirtProvider implements VirtualizationProvider {
       }
     }
     if (await this.exists(name)) {
+      // A lost completion response can cause a create operation to be retried.
+      // Do not mark that retry successful merely because the libvirt domain exists.
+      const existingState = await this.domainState(name);
+      if (existingState === "running" || existingState === "idle") {
+        return { ipAddress: publicNetwork?.ipAddress ?? await this.findIp(name) };
+      }
+      if (existingState !== "shut off") {
+        throw new Error("Existing VPS domain state cannot be safely reconciled; manual inspection is required");
+      }
+      await this.startDomain(name);
       return { ipAddress: publicNetwork?.ipAddress ?? await this.findIp(name) };
     }
 
