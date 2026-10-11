@@ -12,7 +12,7 @@ import {
   useGetVps, useHealthCheck, useListAuditEvents, useListHosts, useListVps,
   useLoginAdmin, useLogoutAdmin, useOperateVps, useReadinessCheck, useRegisterHost, useSetupAdmin,
 } from '@workspace/api-client-react';
-import type { AuditEvent, Host, VpsInstance, VpsStatusFilter } from '@workspace/api-client-react';
+import type { AuditEvent, Host, VpsCreateInput, VpsInstance, VpsStatusFilter } from '@workspace/api-client-react';
 import { Link, Route, Switch, useLocation, useParams, Router as WouterRouter } from 'wouter';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
@@ -214,10 +214,37 @@ function VpsPage() {
   function createInstance(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); setFormError('');
     const fd = new FormData(e.currentTarget);
+    const publicIpAddress = String(fd.get('publicIpAddress') || '').trim();
+    const publicPrefixLength = String(fd.get('publicPrefixLength') || '').trim();
+    const publicGateway = String(fd.get('publicGateway') || '').trim();
+    const publicMacAddress = String(fd.get('publicMacAddress') || '').trim().toLowerCase();
+    const publicNameserversText = String(fd.get('publicNameservers') || '').trim();
+    const networkFields = [publicIpAddress, publicPrefixLength, publicGateway, publicMacAddress, publicNameserversText];
+    let publicNetwork: VpsCreateInput['publicNetwork'];
+    if (networkFields.some(Boolean)) {
+      if (!liveProvisioning || networkFields.some(value => !value)) {
+        setFormError('For public networking, fill every field and use a real KVM host.');
+        return;
+      }
+      const prefixLength = Number(publicPrefixLength);
+      const nameservers = publicNameserversText.split(',').map(value => value.trim()).filter(Boolean);
+      if (!Number.isInteger(prefixLength) || prefixLength < 1 || prefixLength > 32 || nameservers.length < 1 || nameservers.length > 4) {
+        setFormError('Use a prefix length from 1 to 32 and provide 1–4 comma-separated DNS IPv4 addresses.');
+        return;
+      }
+      publicNetwork = {
+        ipAddress: publicIpAddress,
+        prefixLength,
+        gateway: publicGateway,
+        macAddress: publicMacAddress,
+        nameservers,
+      };
+    }
     create.mutate({ data: {
       name: String(fd.get('name')), osImage: String(fd.get('osImage')) as 'ubuntu-24.04' | 'ubuntu-22.04' | 'debian-12' | 'rocky-9',
       vcpus: Number(fd.get('vcpus')), memoryMb: Number(fd.get('memoryMb')), diskGb: Number(fd.get('diskGb')),
       hostId: String(fd.get('hostId') || '') || null, sshPublicKey: String(fd.get('sshPublicKey') || '') || undefined,
+      ...(publicNetwork ? { publicNetwork } : {}),
     } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListVpsQueryKey() }); qc.invalidateQueries({ queryKey: getGetDashboardQueryKey() }); qc.invalidateQueries({ queryKey: getListAuditEventsQueryKey() }); setCreateOpen(false); }, onError: err => setFormError(errorMessage(err)) });
   }
   const items = query.data || [];
@@ -238,6 +265,14 @@ function VpsPage() {
           <div className="form-field"><label htmlFor="memory">Memory (MB)</label><input id="memory" className="field" name="memoryMb" type="number" min="512" max="262144" step="512" defaultValue="2048" required /></div>
           <div className="form-field"><label htmlFor="disk">Disk (GB)</label><input id="disk" className="field" name="diskGb" type="number" min="5" max="5000" defaultValue="40" required /></div>
           <div className="form-field full"><label htmlFor="ssh-key">SSH public key <span className="helper">{liveProvisioning ? '(required for real provisioning)' : '(optional in simulation)'}</span></label><textarea id="ssh-key" className="field" name="sshPublicKey" required={liveProvisioning} maxLength={8192} rows={3} placeholder="ssh-ed25519 AAAA… operator@device" style={{ resize: 'vertical' }} /></div>
+          {liveProvisioning && <>
+            <div className="form-field full"><strong>Public guest networking (optional)</strong><span className="helper">Leave these fields blank for the default NAT/DHCP network. Only enter IPs and a virtual MAC that your server provider has explicitly assigned to this host.</span></div>
+            <div className="form-field"><label htmlFor="public-ip-address">Assigned public IPv4</label><input id="public-ip-address" className="field" name="publicIpAddress" inputMode="decimal" placeholder="203.0.113.10" /></div>
+            <div className="form-field"><label htmlFor="public-prefix-length">IPv4 prefix length</label><input id="public-prefix-length" className="field" name="publicPrefixLength" type="number" min="1" max="32" placeholder="32" /></div>
+            <div className="form-field"><label htmlFor="public-gateway">Provider gateway IPv4</label><input id="public-gateway" className="field" name="publicGateway" inputMode="decimal" placeholder="Provider-supplied gateway" /></div>
+            <div className="form-field"><label htmlFor="public-mac-address">Provider virtual MAC</label><input id="public-mac-address" className="field" name="publicMacAddress" placeholder="02:00:00:00:00:01" /></div>
+            <div className="form-field full"><label htmlFor="public-nameservers">DNS IPv4 addresses</label><input id="public-nameservers" className="field" name="publicNameservers" placeholder="1.1.1.1, 8.8.8.8" /><span className="helper">If the IP or virtual MAC is not assigned by your provider, do not guess it. Public bridge mode also requires a configured host bridge.</span></div>
+          </>}
         </div>
         {formError && <div className="auth-error">{formError}</div>}
         <div className="modal-foot" style={{ margin: '20px -22px -20px' }}><button type="button" className="button button-secondary" onClick={() => setCreateOpen(false)}>Cancel</button><button className="button" disabled={create.isPending} data-testid="button-submit-vps">{create.isPending ? 'Creating…' : 'Create instance'} <ChevronRight size={14} /></button></div>
