@@ -14,7 +14,7 @@ temporary files. It does not use public networking or change firewall rules.
 USAGE
 }
 
-case "\${1:-}" in
+case "${1:-}" in
   --help|-h) usage; exit 0 ;;
   "") ;;
   *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -26,10 +26,10 @@ note() { printf 'INFO: %s\n' "$*"; }
 
 [[ "$EUID" -eq 0 ]] || fail "Run this live host test as root so it can use qemu:///system and clean up the temporary guest."
 ROOT_DIR="$(cd -- "$(dirname -- "$0")/.." && pwd)"
-IMAGE_DIR="\${BHAI_IMAGE_DIR:-/var/lib/bhai-garage/images}"
-VM_DIR="\${BHAI_VM_DIR:-/var/lib/bhai-garage/vms}"
-AGENT_UID="\${BHAI_AGENT_UID:-1000}"
-AGENT_GID="\${BHAI_AGENT_GID:-1000}"
+IMAGE_DIR="${BHAI_IMAGE_DIR:-/var/lib/bhai-garage/images}"
+VM_DIR="${BHAI_VM_DIR:-/var/lib/bhai-garage/vms}"
+AGENT_UID="${BHAI_AGENT_UID:-1000}"
+AGENT_GID="${BHAI_AGENT_GID:-1000}"
 IMAGE_FILE="noble-server-cloudimg-amd64.img"
 
 [[ "$AGENT_UID" =~ ^[0-9]+$ && "$AGENT_GID" =~ ^[0-9]+$ ]] ||
@@ -161,7 +161,7 @@ for attempt in $(seq 1 150); do
   lease_output="$(virsh --connect qemu:///system domifaddr "$DOMAIN" --source lease 2>/dev/null || true)"
   lease_cidr="$(grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}' <<<"$lease_output" | head -n 1 || true)"
   if [[ -n "$lease_cidr" ]]; then
-    guest_ip="\${lease_cidr%%/*}"
+    guest_ip="${lease_cidr%%/*}"
     break
   fi
   sleep 2
