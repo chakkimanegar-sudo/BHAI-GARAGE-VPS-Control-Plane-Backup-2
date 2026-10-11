@@ -28,7 +28,7 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U bhai_garage -d bhai_garage"
           --health-interval 5s
-          --health-timeout 5s
+          --health-timeout 3s
           --health-retries 20
     steps:
       - name: Check out repository
@@ -53,6 +53,22 @@ jobs:
           PORT: "5000"
           BASE_PATH: "/"
         run: pnpm run build
+
+      - name: Validate Docker Compose deployment configuration
+        env:
+          POSTGRES_PASSWORD: ci-compose-password-0123456789
+          SESSION_SECRET: ci-compose-session-secret-not-for-production-0123456789
+          BHAI_SETUP_TOKEN: ci-compose-setup-token-not-for-production-0123456789
+          BHAI_AGENT_TOKEN: ci-compose-agent-token-not-for-production-0123456789
+        run: docker compose config --quiet
+
+      - name: Build API, web, and host-agent container images
+        env:
+          POSTGRES_PASSWORD: ci-compose-password-0123456789
+          SESSION_SECRET: ci-compose-session-secret-not-for-production-0123456789
+          BHAI_SETUP_TOKEN: ci-compose-setup-token-not-for-production-0123456789
+          BHAI_AGENT_TOKEN: ci-compose-agent-token-not-for-production-0123456789
+        run: docker compose build api web host-agent
 
       - name: Check backup script syntax
         run: bash -n scripts/backup-db.sh scripts/restore-db.sh scripts/test-db-backup.sh scripts/prepare-kvm-host.sh scripts/test-prepare-kvm-host.sh
