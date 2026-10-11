@@ -93,6 +93,16 @@ The install mode requires root and may install packages and activate the libvirt
 
 After preflight passes, run `sudo bash scripts/smoke-test-kvm-host.sh` on the actual KVM host. This opt-in live test creates a uniquely named temporary 1-vCPU/1-GiB Ubuntu guest on the default private NAT network, waits up to five minutes for a DHCP lease, and then undefines the test guest and removes its temporary files. It does not modify the public interface, firewall rules, or existing VM domains. If cleanup cannot be confirmed, it preserves the temporary files and reports the domain/path for manual recovery. The regular hosted CI checks this command's syntax/help only; it does not pretend to boot a VM without a real host.
 
+### Offline VPS disk backups
+
+For a conservative first backup path, power off the VPS cleanly and verify it is fully `shut off`. Mount a separate backup filesystem or off-host share at a dedicated mount point, then run the following on the KVM host (replace the domain with its actual `bg-` plus 32-hex ID):
+
+```sh
+sudo env BHAI_VM_BACKUP_DIR=/mnt/off-host-backups bash scripts/backup-vps-disks.sh bg-0123456789abcdef0123456789abcdef
+```
+
+The script refuses running, paused, or crashed guests; refuses a destination that is not a mount point or overlaps live VM storage; validates the source QCOW2; converts it to a standalone image (flattening its backing chain); captures the inactive libvirt domain XML; creates SHA-256 checksums; and publishes the bundle as one atomic directory rename. Verify a bundle with `sha256sum --check SHA256SUMS` from inside that backup directory. This is an **offline** backup and requires downtime; it does not back up the PostgreSQL control plane, provide an automatic restore, or replace scheduled off-host retention and restore drills. Keep the backup mount unavailable to customer guest VMs.
+
 For the Compose host-agent, configure the host-side image and VM directories, the image map inside the container, and the numeric group ID of the libvirt socket. Starting values after running the helper are:
 
 ```sh
@@ -187,6 +197,6 @@ The complete schemas and status codes are in `lib/api-spec/openapi.yaml`. Never 
 
 ## Data and ownership
 
-PostgreSQL holds admin accounts/sessions, hosts, VPS metadata, queued operations, and audit events. Back up the database and the real host's VM storage separately. Deleting a real VPS removes its libvirt domain and its agent-owned files. There is no built-in customer billing, public VM networking/address allocation, backups, snapshots, rescue console, support desk, or uptime guarantee.
+PostgreSQL holds admin accounts/sessions, hosts, VPS metadata, queued operations, and audit events. The API supports an optional provider-assigned public-network tuple per VPS, but it does not allocate public IPs; the provider bridge/routing still needs host-specific configuration. Back up the database and the real host's VM storage separately. The offline disk-backup script is a manual, shut-off-guest backup utility, not a scheduler or restore service. Deleting a real VPS removes its libvirt domain and its agent-owned files. There is no customer account/tenant billing system, live snapshots, rescue console, support desk, or uptime guarantee.
 
 Running a hosting service also requires physical or rented hardware, electricity, cooling, a stable internet connection, sufficient upstream bandwidth, routable IP addresses or a tunnel, firewall/DDoS planning, storage backups, monitoring, security updates, and ongoing incident and hardware maintenance. Docker Compose does not supply those resources.
