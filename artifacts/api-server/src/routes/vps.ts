@@ -66,6 +66,13 @@ router.post("/vps", requireAdmin, async (req, res): Promise<void> => {
   }
   const input = parsed.data;
   const liveMode = isRealProvisioning();
+  const publicNetwork = input.publicNetwork
+    ? { ...input.publicNetwork, macAddress: input.publicNetwork.macAddress.toLowerCase() }
+    : null;
+  if (publicNetwork && !liveMode) {
+    res.status(400).json({ error: "A provider-assigned public IP and virtual MAC can only be used with the real KVM provider." });
+    return;
+  }
   if (
     liveMode &&
     !input.sshPublicKey?.trim().match(
@@ -145,7 +152,8 @@ router.post("/vps", requireAdmin, async (req, res): Promise<void> => {
         diskGb: input.diskGb,
         status: liveMode ? "provisioning" : "running",
         provider: liveMode ? "libvirt" : "simulation",
-        ipAddress: liveMode ? null : simulatedIp(id),
+        ipAddress: liveMode ? publicNetwork?.ipAddress ?? null : simulatedIp(id),
+        publicNetwork: liveMode ? publicNetwork : null,
         sshPublicKey: input.sshPublicKey?.trim() || null,
         cpuUsagePercent: liveMode ? 0 : 7.4,
         memoryUsedMb: liveMode ? 0 : Math.min(input.memoryMb, 384),
@@ -188,7 +196,7 @@ router.post("/vps", requireAdmin, async (req, res): Promise<void> => {
     }));
   } catch (error) {
     if (isUniqueViolation(error)) {
-      res.status(409).json({ error: "A VPS with this name already exists." });
+      res.status(409).json({ error: "The VPS name, public IPv4 address, or virtual MAC is already assigned." });
       return;
     }
     throw error;
