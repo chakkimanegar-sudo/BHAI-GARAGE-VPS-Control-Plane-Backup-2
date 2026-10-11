@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly IMAGE_ID="ubuntu-24.04"
 readonly IMAGE_FILE="noble-server-cloudimg-amd64.img"
 readonly IMAGE_URL="https://cloud-images.ubuntu.com/noble/current"
 readonly CONTAINER_IMAGE_DIR="/var/lib/bhai-garage/images"
-readonly CONTAINER_VM_DIR="/var/lib/bhai-garage/vms"
 
 MODE="check"
 case "${1:---check}" in
@@ -117,6 +115,14 @@ if [[ "$MODE" == "install" ]]; then
   virsh --connect qemu:///system net-autostart default
 
   install -d -o root -g root -m 0755 "$IMAGE_DIR"
+  if [[ -e "$VM_DIR" ]]; then
+    [[ -d "$VM_DIR" ]] || fail "VM storage path exists but is not a directory: $VM_DIR"
+    existing_entries="$(find "$VM_DIR" -mindepth 1 -maxdepth 1 -print -quit)"
+    existing_owner="$(stat -c %u "$VM_DIR")"
+    if [[ -n "$existing_entries" && "$existing_owner" != "$AGENT_UID" ]]; then
+      fail "Existing VM storage is non-empty and owned by another UID. Refusing to change ownership automatically: $VM_DIR"
+    fi
+  fi
   install -d -o "$AGENT_UID" -g "$AGENT_GID" -m 0750 "$VM_DIR"
 
   IMAGE_PATH="$IMAGE_DIR/$IMAGE_FILE"
