@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 readonly IMAGE_FILE="noble-server-cloudimg-amd64.img"
 readonly IMAGE_URL="https://cloud-images.ubuntu.com/releases/noble/release"
-readonly CONTAINER_IMAGE_DIR="/var/lib/bhai-garage/images"
+readonly LIBVIRT_IMAGE_ROOT="/var/lib/libvirt/images"
 
 MODE="check"
 case "${1:---check}" in
@@ -111,8 +111,8 @@ write_image_checksum_record() {
   install -o root -g root -m 0444 "$temp_record" "$record"
 }
 
-IMAGE_DIR="${BHAI_IMAGE_DIR:-/var/lib/bhai-garage/images}"
-VM_DIR="${BHAI_VM_DIR:-/var/lib/bhai-garage/vms}"
+IMAGE_DIR="${BHAI_IMAGE_DIR:-/var/lib/libvirt/images/bhai-garage-base}"
+VM_DIR="${BHAI_VM_DIR:-/var/lib/libvirt/images/bhai-garage-vms}"
 AGENT_UID="${BHAI_AGENT_UID:-1000}"
 AGENT_GID="${BHAI_AGENT_GID:-1000}"
 OS_RELEASE="$(host_path /etc/os-release)"
@@ -121,6 +121,18 @@ KVM_DEVICE="$(host_path /dev/kvm)"
 
 [[ "$AGENT_UID" =~ ^[0-9]+$ && "$AGENT_GID" =~ ^[0-9]+$ ]] ||
   fail "BHAI_AGENT_UID and BHAI_AGENT_GID must be numeric."
+
+# Keep all guest disks and their backing images inside libvirt's standard
+# image tree. This is compatible with Ubuntu's default per-guest AppArmor path
+# policy; a custom storage tree needs a separately reviewed AppArmor policy.
+case "$IMAGE_DIR" in "$LIBVIRT_IMAGE_ROOT"/*) ;; *)
+  fail "BHAI_IMAGE_DIR must be a child of $LIBVIRT_IMAGE_ROOT for the default libvirt AppArmor policy."
+  ;;
+esac
+case "$VM_DIR" in "$LIBVIRT_IMAGE_ROOT"/*) ;; *)
+  fail "BHAI_VM_DIR must be a child of $LIBVIRT_IMAGE_ROOT for the default libvirt AppArmor policy."
+  ;;
+esac
 
 [[ -r "$OS_RELEASE" ]] || fail "Cannot read /etc/os-release."
 # shellcheck disable=SC1090
@@ -167,7 +179,15 @@ if [[ "$MODE" == "install" ]]; then
       fail "Existing VM storage is non-empty and owned by another UID. Refusing to change ownership automatically: $VM_DIR"
     fi
   fi
-  install -d -o "$AGENT_UID" -g "$AGENT_GID" -m 0750 "$VM_DIR"
+  install -d -o "$AGENT_UID" -g "$AGENT_GID" -m 0711 "$VM_DIR"
+  # Existing managed instance directories may have been created with 0750.
+  # Add only the search bit needed by libvirt-qemu; do not change guest files.
+  while IFS= read -r -d '' instance_dir; do
+    instance_owner="$(stat -c '%u' "$instance_dir")"
+    [[ "$instance_owner" == "$AGENT_UID" ]] ||
+      fail "Managed VM directory is not owned by UID $AGENT_UID; refusing to chmod it: $instance_dir"
+    chmod o+x "$instance_dir"
+  done < <(find "$VM_DIR" -mindepth 1 -maxdepth 1 -type d -name 'bg-*' -print0)
 
   IMAGE_PATH="$IMAGE_DIR/$IMAGE_FILE"
   CHECKSUM_PATH="$IMAGE_PATH.sha256"
@@ -242,16 +262,39 @@ image_metadata="$(qemu-img info --output=json "$IMAGE_PATH")" ||
   fail "qemu-img cannot read the Ubuntu cloud image."
 grep -Eq '"format"[[:space:]]*:[[:space:]]*"qcow2"' <<<"$image_metadata" ||
   fail "The configured Ubuntu cloud image is not QCOW2."
+LIBVIRT_ROOT_PATH="$(host_path "$LIBVIRT_IMAGE_ROOT")"
+IMAGE_DIR_PATH="$(host_path "$IMAGE_DIR")"
 VM_PATH="$(host_path "$VM_DIR")"
-[[ -d "$VM_PATH" && -w "$VM_PATH" ]] || fail "VM storage is missing or not writable: $VM_DIR"
+[[ -d "$LIBVIRT_ROOT_PATH" ]] || fail "Standard libvirt image root is missing: $LIBVIRT_IMAGE_ROOT"
+[[ -d "$IMAGE_DIR_PATH" && -d "$VM_PATH" && -w "$VM_PATH" ]] ||
+  fail "VM storage or cloud-image directory is missing/not writable: $IMAGE_DIR / $VM_DIR"
+libvirt_root_real="$(realpath -e -- "$LIBVIRT_ROOT_PATH")"
+image_dir_real="$(realpath -e -- "$IMAGE_DIR_PATH")"
+vm_dir_real="$(realpath -e -- "$VM_PATH")"
+[[ "$image_dir_real" == "$libvirt_root_real/"* ]] ||
+  fail "Cloud-image directory resolves outside libvirt's standard image root: $IMAGE_DIR"
+[[ "$vm_dir_real" == "$libvirt_root_real/"* ]] ||
+  fail "VM storage resolves outside libvirt's standard image root: $VM_DIR"
 vm_owner="$(stat -c '%u' "$VM_PATH")"
 [[ "$vm_owner" == "$AGENT_UID" ]] ||
   fail "VM storage owner UID is $vm_owner; Docker host-agent runs as UID $AGENT_UID. Run --install or fix ownership."
+vm_mode="$(stat -c '%a' "$VM_PATH")"
+vm_other_exec="${vm_mode: -1}"
+[[ "$vm_other_exec" =~ [1357] ]] ||
+  fail "VM storage must grant search-only access to libvirt-qemu (missing other execute bit): $VM_PATH. Run --install."
+# Existing VM directories also need traverse permission; the installer repairs
+# only the directory search bit without changing data files.
+while IFS= read -r -d '' instance_dir; do
+  instance_mode="$(stat -c '%a' "$instance_dir")"
+  instance_other_exec="${instance_mode: -1}"
+  [[ "$instance_other_exec" =~ [1357] ]] ||
+    fail "Existing VM directory is not searchable by libvirt-qemu: $instance_dir. Run --install to repair it."
+done < <(find "$VM_PATH" -mindepth 1 -maxdepth 1 -type d -name 'bg-*' -print0)
 pass "Ubuntu QCOW2 image integrity and writable VM storage verified."
 pass "cloud-localds is available for cloud-init SSH-key provisioning."
 
 note "For Compose, map BHAI_IMAGE_DIR=$IMAGE_DIR and BHAI_VM_DIR=$VM_DIR."
-note "Set BHAI_IMAGES_JSON to {\"ubuntu-24.04\":\"$CONTAINER_IMAGE_DIR/$IMAGE_FILE\"}."
+note "Set BHAI_IMAGES_JSON to {\"ubuntu-24.04\":\"$IMAGE_DIR/$IMAGE_FILE\"}."
 note "Set LIBVIRT_GID to the numeric group ID of the host's libvirt socket."
 note "This prepares guest outbound NAT only. It does not assign public IPs to guests or change firewall rules."
 note "Before customer hosting, choose a provider-specific routed IP/bridge or an explicitly documented port-forwarding plan, then restrict SSH/API/guest ingress with the provider and host firewall."
