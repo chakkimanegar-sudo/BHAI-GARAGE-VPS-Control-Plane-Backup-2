@@ -59,14 +59,20 @@ export class LibvirtProvider implements VirtualizationProvider {
     }
 
     const capabilities = await this.virsh(["capabilities"], 10_000);
-    const hostArchitecture = capabilities.match(/<host>[\\s\\S]*?<arch>([^<]+)<\\/arch>/)?.[1]?.trim();
-    const x86Guest = capabilities.match(/<arch\\s+name=['"]x86_64['"][^>]*>([\\s\\S]*?)<\\/arch>/)?.[1] ?? "";
-    if (hostArchitecture !== "x86_64" || !/<domain\\s+type=['"]kvm['"]/.test(x86Guest)) {
+    const hostSection = capabilities.split("<host>", 2)[1]?.split("</host>", 1)[0] ?? "";
+    const hostArchitecture = hostSection.includes("<arch>x86_64</arch>") ? "x86_64" : "";
+    const x86Guest = (
+      capabilities.split("<arch name='x86_64'", 2)[1]?.split("</arch>", 1)[0] ??
+      capabilities.split('<arch name="x86_64"', 2)[1]?.split("</arch>", 1)[0] ??
+      ""
+    );
+    const hasKvm = x86Guest.includes("type='kvm'") || x86Guest.includes('type="kvm"');
+    if (hostArchitecture !== "x86_64" || !hasKvm) {
       throw new Error("This host must expose x86_64 KVM acceleration for VPS guests");
     }
 
     const networkInfo = await this.virsh(["net-info", this.config.libvirtNetwork], 10_000);
-    if (!/^Active:\\s+yes\\s*$/mi.test(networkInfo)) {
+    if (!networkInfo.split("\n").some((line) => line.trim() === "Active: yes")) {
       throw new Error(`The configured libvirt network "${this.config.libvirtNetwork}" must be active`);
     }
 
