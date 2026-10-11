@@ -53,6 +53,13 @@ export BHAI_VM_DIR=/var/lib/bhai-garage/vms
 export BHAI_AGENT_UID="$(id -u)"
 export BHAI_AGENT_GID="$(id -g)"
 
+# Production provisioning must use the stable released image stream, not daily builds.
+grep -Fq 'readonly IMAGE_URL="https://cloud-images.ubuntu.com/releases/noble/release"' "$root/scripts/prepare-kvm-host.sh"
+if grep -Fq 'cloud-images.ubuntu.com/noble/current' "$root/scripts/prepare-kvm-host.sh"; then
+  echo "KVM preparation unexpectedly uses the daily cloud image stream." >&2
+  exit 1
+fi
+
 check_output="$(bash "$root/scripts/prepare-kvm-host.sh" --check)"
 grep -Fq 'PASS: Ubuntu 24.04 x86_64 host exposes CPU virtualization and /dev/kvm.' <<<"$check_output"
 grep -Fq 'PASS: libvirt KVM guest support and active default NAT network verified.' <<<"$check_output"
