@@ -40,6 +40,50 @@ router.post("/agent/heartbeat", requireHostAgent, async (req, res): Promise<void
 
 router.post("/agent/operations/next", requireHostAgent, async (_req, res): Promise<void> => {
   const claimed = await db.transaction(async (tx) => {
+    // Once a host has claimed an operation ten times without reporting a result,
+    // stop retrying it and make the VPS state visible instead of leaving it stuck.
+    const exhausted = await tx.execute(sql`
+      UPDATE agent_operations
+      SET state = 'failed', updated_at = NOW()
+      WHERE host_id = ${res.locals.host!.id}
+        AND state = 'claimed'
+        AND attempts >= 10
+        AND claimed_at < NOW() - INTERVAL '5 minutes'
+      RETURNING id, vps_id, action, payload, attempts
+    `);
+    for (const row of exhausted.rows as Array<{
+      id: string;
+      vps_id: string | null;
+      action: string;
+      payload: Record<string, unknown> | null;
+      attempts: number;
+    }>) {
+      const previousStatusValue = row.payload?.previousStatus;
+      const previousStatus: "running" | "stopped" | "failed" =
+        previousStatusValue === "running" || previousStatusValue === "stopped" || previousStatusValue === "failed"
+          ? previousStatusValue
+          : "failed";
+      const status: "running" | "stopped" | "failed" =
+        row.action === "create" ? "failed" : previousStatus;
+      if (row.vps_id) {
+        await tx.update(vpsInstances)
+          .set({ status, updatedAt: new Date() })
+          .where(eq(vpsInstances.id, row.vps_id));
+        await tx.insert(auditEvents).values({
+          actor: `host-agent:${res.locals.host!.name}`,
+          action: "agent.operation.exhausted",
+          resourceType: "vps",
+          resourceId: row.vps_id,
+          details: {
+            operationId: row.id,
+            operationAction: row.action,
+            attempts: row.attempts,
+            error: "Host operation exceeded the retry limit without a completion result.",
+          },
+        });
+      }
+    }
+
     const result = await tx.execute(sql`
       UPDATE agent_operations
       SET state = 'claimed', claimed_at = NOW(), attempts = attempts + 1, updated_at = NOW()
