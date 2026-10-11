@@ -10,7 +10,7 @@ backup_dir="$temporary_root/off-host-backups"
 domain="bg-00000000000040008000000000000002"
 guest_dir="$vm_storage/$domain"
 mkdir -p "$fake_bin" "$guest_dir" "$backup_dir"
-printf 'FAKE-QCOW2-DISK\\n' > "$guest_dir/root.qcow2"
+printf 'FAKE-QCOW2-DISK\n' > "$guest_dir/root.qcow2"
 export PATH="$fake_bin:$PATH"
 export FAKE_VPS_STATE="shut off"
 export FAKE_QEMU_FORMAT="qcow2"
@@ -23,9 +23,9 @@ cat > "$fake_bin/virsh" <<'FAKE_VIRSH'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 case "${3:-}" in
-  domstate) printf '%s\\n' "${FAKE_VPS_STATE:-shut off}" ;;
+  domstate) printf '%s\n' "${FAKE_VPS_STATE:-shut off}" ;;
   dumpxml)
-    printf "<domain><name>%s</name><devices><disk file='%s'/></devices></domain>\\n" "$4" "$FAKE_DOMAIN_DISK"
+    printf "<domain><name>%s</name><devices><disk file='%s'/></devices></domain>\n" "$4" "$FAKE_DOMAIN_DISK"
     ;;
   *) echo "Unexpected virsh command: $*" >&2; exit 90 ;;
 esac
@@ -35,7 +35,7 @@ cat > "$fake_bin/qemu-img" <<'FAKE_QEMU_IMG'
 set -Eeuo pipefail
 case "${1:-}" in
   info)
-    printf '{"format":"%s","virtual-size":8589934592}\\n' "${FAKE_QEMU_FORMAT:-qcow2}"
+    printf '{"format":"%s","virtual-size":8589934592}\n' "${FAKE_QEMU_FORMAT:-qcow2}"
     ;;
   check)
     [[ -s "${4:-}" ]] || exit 1
@@ -79,7 +79,7 @@ fi
 # The valid offline backup must be standalone, checksummed, and permission-restricted.
 export FAKE_QEMU_FORMAT="qcow2"
 output="$(bash "$root/scripts/backup-vps-disks.sh" "$domain")"
-bundle="$(printf '%s\\n' "$output" | sed -n 's/^VPS disk backup created: //p')"
+bundle="$(printf '%s\n' "$output" | sed -n 's/^VPS disk backup created: //p')"
 [[ -n "$bundle" && -d "$bundle" ]]
 [[ -s "$bundle/root.qcow2" && -s "$bundle/domain.xml" && -s "$bundle/disk-info.json" && -s "$bundle/manifest.txt" && -s "$bundle/SHA256SUMS" ]]
 (cd "$bundle" && sha256sum --check SHA256SUMS >/dev/null)
@@ -89,7 +89,7 @@ grep -Fq "domain=$domain" "$bundle/manifest.txt"
 grep -Fq "backing_chain=flattened" "$bundle/manifest.txt"
 
 # Tampering with any backup artifact must be detectable.
-printf 'tamper\\n' >> "$bundle/root.qcow2"
+printf 'tamper\n' >> "$bundle/root.qcow2"
 if (cd "$bundle" && sha256sum --check SHA256SUMS >/dev/null 2>&1); then
   echo "Disk backup checksum unexpectedly accepted a tampered image." >&2
   exit 1
