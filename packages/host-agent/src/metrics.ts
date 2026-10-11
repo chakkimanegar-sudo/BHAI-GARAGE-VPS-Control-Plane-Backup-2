@@ -33,7 +33,11 @@ function networkCounters(contents: string): { rx: number; tx: number } {
 export class HostMetricsCollector {
   private previous: Snapshot | null = null;
 
-  constructor(private readonly config: AgentConfig) {}
+  private readonly config: AgentConfig;
+
+  constructor(config: AgentConfig) {
+    this.config = config;
+  }
 
   async collect(): Promise<HostMetrics> {
     const [stat, network, filesystem] = await Promise.all([

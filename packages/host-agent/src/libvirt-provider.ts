@@ -38,18 +38,43 @@ function validSshPublicKey(value: string | null): value is string {
 }
 
 export class LibvirtProvider implements VirtualizationProvider {
-  constructor(private readonly config: AgentConfig) {}
+  private readonly config: AgentConfig;
+
+  constructor(config: AgentConfig) {
+    this.config = config;
+  }
 
   private async virsh(args: string[], timeout?: number): Promise<string> {
     return command("virsh", ["--connect", this.config.libvirtUri, ...args], timeout);
   }
 
   private async exists(domain: string): Promise<boolean> {
+    // A successful inventory query distinguishes "not defined" from a broken
+    // libvirt connection. Never treat an arbitrary command failure as absence.
+    const output = await this.virsh(["list", "--all", "--name"], 10_000);
+    return output.split(/\r?\n/).some((name) => name.trim() === domain);
+  }
+
+  private async removeDomainIfPresent(domain: string): Promise<void> {
+    if (!(await this.exists(domain))) return;
+
+    const state = (await this.virsh(["domstate", domain], 10_000)).trim().toLowerCase();
+    const isStopped = state === "shut off" || state === "shutoff" || state === "crashed";
+    if (!isStopped) {
+      await this.virsh(["destroy", domain], 30_000);
+    }
+
     try {
-      await this.virsh(["dominfo", domain], 10_000);
-      return true;
+      await this.virsh(["undefine", domain, "--nvram"], 30_000);
     } catch {
-      return false;
+      // Older libvirt versions may not support --nvram; try the portable form.
+      if (await this.exists(domain)) {
+        await this.virsh(["undefine", domain], 30_000);
+      }
+    }
+
+    if (await this.exists(domain)) {
+      throw new Error("Libvirt still reports the VPS domain after removal");
     }
   }
 
@@ -164,25 +189,31 @@ export class LibvirtProvider implements VirtualizationProvider {
       await this.virsh(["start", name]);
       return { ipAddress: await this.findIp(name) };
     } catch (error) {
+      let rollbackConfirmed = false;
       try {
-        if (await this.exists(name)) await this.virsh(["undefine", name, "--nvram"]);
+        await this.removeDomainIfPresent(name);
+        rollbackConfirmed = true;
       } catch {
-        // Preserve the first provisioning error; manual cleanup is documented for partial failures.
+        // The VM may still reference these files. Preserve them if libvirt cleanup
+        // cannot be confirmed, and preserve the original provisioning error.
       }
-      await rm(instanceDirectory, { recursive: true, force: true });
+      if (rollbackConfirmed) {
+        await rm(instanceDirectory, { recursive: true, force: true });
+      } else {
+        process.stderr.write(`${JSON.stringify({
+          timestamp: new Date().toISOString(),
+          service: "bhai-garage-host-agent",
+          event: "provisioning-rollback-incomplete",
+          domain: name,
+          storagePreserved: true,
+        })}\n`);
+      }
       throw error;
     }
   }
 
   private async delete(name: string, id: string): Promise<void> {
-    if (await this.exists(name)) {
-      try {
-        await this.virsh(["destroy", name], 30_000);
-      } catch {
-        // An already-stopped domain does not need to be destroyed.
-      }
-      await this.virsh(["undefine", name, "--nvram"], 30_000);
-    }
+    await this.removeDomainIfPresent(name);
     const instanceDirectory = path.resolve(this.config.storageDirectory, name);
     const expectedPrefix = `${path.resolve(this.config.storageDirectory)}${path.sep}`;
     if (!instanceDirectory.startsWith(expectedPrefix) || name !== domainName(id)) {
