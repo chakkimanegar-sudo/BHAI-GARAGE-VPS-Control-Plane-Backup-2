@@ -91,7 +91,12 @@ jobs:
               !mountTargets.includes(process.env.BHAI_VM_DIR)) {
             throw new Error("Host-agent VM path mismatch: " + JSON.stringify({expected: process.env.BHAI_VM_DIR, configured: agent?.environment?.BHAI_VM_STORAGE, mountTargets, volumes}));
           }
-          console.log("Web/API are loopback-only; PostgreSQL is private; KVM image and VM paths match their mounts.");
+          const supplementalGroups = (agent?.group_add ?? []).map(String);
+          if (agent?.environment?.BHAI_QEMU_GID !== process.env.BHAI_QEMU_GID ||
+              !supplementalGroups.includes(process.env.BHAI_QEMU_GID)) {
+            throw new Error("Host-agent must receive the configured QEMU GID as an environment value and supplementary group");
+          }
+          console.log("Web/API are loopback-only; PostgreSQL is private; KVM image/VM mounts and QEMU group agree.");
           NODE
 
       - name: Build API, web, and host-agent container images
