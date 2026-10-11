@@ -156,6 +156,7 @@ test("libvirt outages and unconfirmed rollback preserve VPS storage", async () =
     hostname: "test-host",
     imageDirectory: images,
     storageDirectory: storage,
+    qemuGid: typeof process.getgid === "function" ? process.getgid() : 0,
     libvirtUri: "qemu:///system",
     libvirtNetwork: "default",
     images: { "ubuntu-24.04": image },
