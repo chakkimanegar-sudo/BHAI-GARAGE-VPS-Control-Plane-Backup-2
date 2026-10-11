@@ -12,6 +12,24 @@ permissions:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://bhai_garage:ci_test_password@localhost:5432/bhai_garage
+      SESSION_SECRET: bhai-garage-ci-session-secret-not-for-production-0123456789
+      BHAI_SETUP_TOKEN: bhai-garage-ci-setup-token-not-for-production-0123456789
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: bhai_garage
+          POSTGRES_USER: bhai_garage
+          POSTGRES_PASSWORD: ci_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bhai_garage -d bhai_garage"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -38,6 +56,9 @@ jobs:
 
       - name: Test host agent
         run: pnpm --filter @workspace/host-agent run test
+
+      - name: Apply database schema to test database
+        run: pnpm --filter @workspace/db run push
 
       - name: Test API server recovery logic
         run: pnpm --filter @workspace/api-server run test
