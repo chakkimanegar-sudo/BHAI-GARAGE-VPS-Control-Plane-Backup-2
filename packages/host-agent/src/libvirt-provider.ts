@@ -8,6 +8,51 @@ import { assertVpsConfiguration, type AgentConfig } from "./config.ts";
 
 const execFile = promisify(execFileCallback);
 
+const DOMAIN_STATE_TIMEOUT_MS = 120_000;
+const DOMAIN_STATE_POLL_INTERVAL_MS = 1_000;
+
+function normalizeDomainState(state: string): string {
+  const normalized = state.trim().toLowerCase().replace(/\s+/g, " ");
+  return normalized === "shutoff" ? "shut off" : normalized;
+}
+
+export async function waitForDomainState(
+  readState: () => Promise<string>,
+  expectedStates: readonly string[],
+  timeoutMs = DOMAIN_STATE_TIMEOUT_MS,
+  pollIntervalMs = DOMAIN_STATE_POLL_INTERVAL_MS,
+): Promise<string> {
+  const expected = new Set(expectedStates.map(normalizeDomainState).filter(Boolean));
+  if (expected.size === 0) {
+    throw new Error("At least one expected libvirt domain state is required");
+  }
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0 ||
+      !Number.isFinite(pollIntervalMs) || pollIntervalMs < 1) {
+    throw new Error("Invalid libvirt domain-state polling interval");
+  }
+
+  const deadline = Date.now() + timeoutMs;
+  let lastState = "unknown";
+  while (true) {
+    try {
+      lastState = normalizeDomainState(await readState()) || "unknown";
+    } catch {
+      throw new Error("Unable to verify VPS domain state through libvirt");
+    }
+    if (expected.has(lastState)) return lastState;
+
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      throw new Error(
+        "Timed out waiting for VPS state " + Array.from(expected).join(" or ") +
+        "; last observed state: " + lastState,
+      );
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, remaining)));
+  }
+}
+
+
 async function command(program: string, args: string[], timeout = 60_000): Promise<string> {
   const { stdout } = await execFile(program, args, {
     timeout,
@@ -110,6 +155,28 @@ export class LibvirtProvider implements VirtualizationProvider {
     return output.split(/\r?\n/).some((name) => name.trim() === domain);
   }
 
+  private async domainState(domain: string): Promise<string> {
+    return normalizeDomainState(await this.virsh(["domstate", domain], 10_000));
+  }
+
+  private async waitForState(domain: string, expectedStates: readonly string[]): Promise<void> {
+    await waitForDomainState(() => this.domainState(domain), expectedStates);
+  }
+
+  private async startDomain(domain: string): Promise<void> {
+    const currentState = await this.domainState(domain);
+    if (currentState === "running" || currentState === "idle") return;
+    await this.virsh(["start", domain]);
+    await this.waitForState(domain, ["running", "idle"]);
+  }
+
+  private async stopDomain(domain: string): Promise<void> {
+    const currentState = await this.domainState(domain);
+    if (currentState === "shut off") return;
+    await this.virsh(["shutdown", domain]);
+    await this.waitForState(domain, ["shut off"]);
+  }
+
   private async removeDomainIfPresent(domain: string): Promise<void> {
     if (!(await this.exists(domain))) return;
 
@@ -150,13 +217,14 @@ export class LibvirtProvider implements VirtualizationProvider {
       case "create":
         return this.create(operation, name);
       case "start":
-        await this.virsh(["start", name]);
+        await this.startDomain(name);
         break;
       case "stop":
-        await this.virsh(["shutdown", name]);
+        await this.stopDomain(name);
         break;
       case "restart":
-        await this.virsh(["reboot", name]);
+        await this.stopDomain(name);
+        await this.startDomain(name);
         break;
       case "delete":
         await this.delete(name, operation.vps.id);
@@ -242,6 +310,7 @@ export class LibvirtProvider implements VirtualizationProvider {
       await writeFile(xmlPath, domainXml, { mode: 0o600 });
       await this.virsh(["define", xmlPath]);
       await this.virsh(["start", name]);
+      await this.waitForState(name, ["running", "idle"]);
       return { ipAddress: await this.findIp(name) };
     } catch (error) {
       let rollbackConfirmed = false;
