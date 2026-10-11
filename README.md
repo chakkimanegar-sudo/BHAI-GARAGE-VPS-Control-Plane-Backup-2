@@ -80,7 +80,7 @@ The API workflow uses port 5000 and the web artifact uses Vite. Set `BHAI_SETUP_
 
 ## Prepare a real KVM host
 
-The host preparation helper supports **Ubuntu Server 24.04 LTS on x86-64 bare metal**. It installs KVM/libvirt/QEMU tools, activates libvirt's default NAT network, creates the host image/VM storage directories, and downloads Canonical's Ubuntu 24.04 AMD64 cloud image only after verifying the signed SHA-256 manifest.
+The host preparation helper supports **Ubuntu Server 24.04 LTS on x86-64 bare metal**. It installs KVM/libvirt/QEMU tools, activates libvirt's default NAT network, creates the host image/VM storage directories, and downloads Canonical's stable Ubuntu 24.04 AMD64 released cloud image (not a daily build) only after verifying the signed SHA-256 manifest.
 
 Run on the **new Linux host** from this repository checkout:
 
