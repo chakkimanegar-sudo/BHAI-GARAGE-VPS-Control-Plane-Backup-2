@@ -6,7 +6,7 @@ usage() {
 Create a verified offline backup of one BHAI GARAGE libvirt VPS disk.
 
 Usage:
-  BHAI_VM_BACKUP_DIR=/mnt/off-host-backups sudo bash scripts/backup-vps-disks.sh bg-<32-hex-vps-id>
+  sudo env BHAI_VM_BACKUP_DIR=/mnt/off-host-backups bash scripts/backup-vps-disks.sh bg-<32-hex-vps-id>
 
 Safety:
   - Guest must be fully shut off; running, paused, or crashed guests are refused.
@@ -126,7 +126,7 @@ chmod 0600 "$temporary_dir"/root.qcow2 "$temporary_dir"/domain.xml \
   "$temporary_dir"/disk-info.json "$temporary_dir"/manifest.txt "$temporary_dir"/SHA256SUMS
 
 final_dir="$backup_real/$bundle_name"
-mv -- "$temporary_dir" "$final_dir"
+mv -T -- "$temporary_dir" "$final_dir"
 temporary_dir=""
 trap - EXIT
 
