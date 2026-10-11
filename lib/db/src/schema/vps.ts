@@ -1,13 +1,23 @@
+import { sql } from "drizzle-orm";
 import {
   pgTable,
   text,
   timestamp,
   uuid,
   integer,
+  jsonb,
   real,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { hosts } from "./hosts";
+
+export interface PublicNetworkConfig {
+  ipAddress: string;
+  prefixLength: number;
+  gateway: string;
+  macAddress: string;
+  nameservers: string[];
+}
 
 export const vpsInstances = pgTable(
   "vps_instances",
@@ -16,6 +26,7 @@ export const vpsInstances = pgTable(
     name: text("name").notNull(),
     hostId: uuid("host_id").references(() => hosts.id, { onDelete: "set null" }),
     ipAddress: text("ip_address"),
+    publicNetwork: jsonb("public_network").$type<PublicNetworkConfig>(),
     osImage: text("os_image").notNull(),
     vcpus: integer("vcpus").notNull(),
     memoryMb: integer("memory_mb").notNull(),
@@ -34,5 +45,13 @@ export const vpsInstances = pgTable(
       .defaultNow()
       .$onUpdate(() => new Date()),
   },
-  (table) => [uniqueIndex("vps_instances_name_unique").on(table.name)],
+  (table) => [
+    uniqueIndex("vps_instances_name_unique").on(table.name),
+    uniqueIndex("vps_instances_public_ip_unique")
+      .on(table.ipAddress)
+      .where(sql`public_network IS NOT NULL AND ip_address IS NOT NULL`),
+    uniqueIndex("vps_instances_public_mac_unique")
+      .on(sql`lower(public_network->>'macAddress')`)
+      .where(sql`public_network IS NOT NULL`),
+  ],
 );
