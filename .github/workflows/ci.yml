@@ -63,8 +63,8 @@ jobs:
           BHAI_IMAGE_DIR: /var/lib/libvirt/images/ci-bhai-garage-images
           BHAI_VM_DIR: /var/lib/libvirt/images/ci-bhai-garage-vms
         run: |
-          docker compose config --quiet
-          docker compose config --format json > "$RUNNER_TEMP/bhai-garage-compose.json"
+          docker compose --profile libvirt config --quiet
+          docker compose --profile libvirt config --format json > "$RUNNER_TEMP/bhai-garage-compose.json"
           node - "$RUNNER_TEMP/bhai-garage-compose.json" <<'NODE'
           const fs = require("node:fs");
           const config = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
