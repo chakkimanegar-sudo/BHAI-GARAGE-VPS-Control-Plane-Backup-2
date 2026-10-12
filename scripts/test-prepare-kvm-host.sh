@@ -86,6 +86,7 @@ grep -Fq 'BHAI_VM_DIR must be a child of /var/lib/libvirt/images' "$temporary_ro
 
 # Production provisioning must use the stable released image stream, not daily builds.
 grep -Fq 'readonly IMAGE_URL="https://cloud-images.ubuntu.com/releases/noble/release"' "$root/scripts/prepare-kvm-host.sh"
+grep -Fq 'readonly UPSTREAM_IMAGE_FILE="ubuntu-24.04-server-cloudimg-amd64.img"' "$root/scripts/prepare-kvm-host.sh"
 if grep -Fq 'cloud-images.ubuntu.com/noble/current' "$root/scripts/prepare-kvm-host.sh"; then
   echo "KVM preparation unexpectedly uses the daily cloud image stream." >&2
   exit 1
