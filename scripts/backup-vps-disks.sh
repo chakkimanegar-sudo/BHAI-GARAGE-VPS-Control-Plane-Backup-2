@@ -105,6 +105,45 @@ validate_qcow2 "$temporary_dir/root.qcow2"
 
 virsh --connect qemu:///system dumpxml --inactive "$domain" > "$temporary_dir/domain.xml" ||
   fail "Unable to capture the inactive libvirt domain definition."
+
+# Validate the XML against the actual files: only one root disk and at most one
+# managed cloud-init CD-ROM are currently supported by this offline backup flow.
+if ! python3 - "$temporary_dir/domain.xml" "$domain" "$disk_path" "$guest_real/cloud-init.iso" <<'PY'
+import os, sys
+import xml.etree.ElementTree as ET
+xml_path, expected_domain, root_disk, seed_disk = sys.argv[1:]
+try:
+    root = ET.parse(xml_path).getroot()
+except Exception as exc:
+    raise SystemExit("Inactive domain XML is invalid: " + str(exc))
+if [(node.text or "") for node in root.findall("./name")] != [expected_domain]:
+    raise SystemExit("Inactive domain XML name differs from the requested VPS")
+disks = root.findall("./devices/disk[@device='disk']")
+if len(disks) != 1:
+    raise SystemExit("Safe disk backup supports exactly one root disk")
+source = disks[0].find("source")
+if disks[0].get("type") != "file" or source is None or source.get("file") != root_disk:
+    raise SystemExit("Inactive domain root disk does not match the VPS root.qcow2 file")
+cdroms = root.findall("./devices/disk[@device='cdrom']")
+if len(cdroms) > 1:
+    raise SystemExit("Safe disk backup supports at most one cloud-init CD-ROM")
+for cdrom in cdroms:
+    source = cdrom.find("source")
+    if source is None or source.get("file") != seed_disk:
+        raise SystemExit("Inactive domain CD-ROM does not match the managed cloud-init ISO")
+    if not os.path.isfile(seed_disk) or os.path.islink(seed_disk):
+        raise SystemExit("Domain references a missing or unsafe cloud-init ISO")
+PY
+then
+  fail "Inactive domain XML contains unsupported or unsafe disk sources."
+fi
+
+if [[ -e "$guest_real/cloud-init.iso" ]]; then
+  [[ -f "$guest_real/cloud-init.iso" && ! -L "$guest_real/cloud-init.iso" ]] ||
+    fail "Managed cloud-init ISO is not a regular file: $guest_real/cloud-init.iso"
+  cp --reflink=auto -- "$guest_real/cloud-init.iso" "$temporary_dir/cloud-init.iso" ||
+    fail "Could not copy the cloud-init ISO required by the archived domain."
+fi
 qemu-img info --output=json "$temporary_dir/root.qcow2" > "$temporary_dir/disk-info.json"
 
 cat > "$temporary_dir/manifest.txt" <<MANIFEST
@@ -120,10 +159,13 @@ MANIFEST
 
 (
   cd -- "$temporary_dir"
-  sha256sum root.qcow2 domain.xml disk-info.json manifest.txt > SHA256SUMS
+  files=(root.qcow2 domain.xml disk-info.json manifest.txt)
+  [[ ! -f cloud-init.iso ]] || files+=(cloud-init.iso)
+  sha256sum "${files[@]}" > SHA256SUMS
 )
 chmod 0600 "$temporary_dir"/root.qcow2 "$temporary_dir"/domain.xml \
   "$temporary_dir"/disk-info.json "$temporary_dir"/manifest.txt "$temporary_dir"/SHA256SUMS
+[[ ! -f "$temporary_dir/cloud-init.iso" ]] || chmod 0600 "$temporary_dir/cloud-init.iso"
 
 final_dir="$backup_real/$bundle_name"
 mv -T -- "$temporary_dir" "$final_dir"
