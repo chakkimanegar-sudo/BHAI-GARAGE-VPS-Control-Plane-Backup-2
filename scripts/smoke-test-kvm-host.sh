@@ -9,8 +9,11 @@ Usage:
   sudo bash scripts/smoke-test-kvm-host.sh
 
 The test creates one uniquely named temporary Ubuntu guest on libvirt's default
-NAT network, waits for its DHCP lease, then undefines the guest and removes its
-temporary files. It does not use public networking or change firewall rules.
+private NAT network. A temporary SSH key verifies guest reachability and that
+cloud-init reports "status: done". It then tests clean shutdown, restart and a
+second readiness check, shuts down and undefines the guest, and removes the
+temporary disk, seed ISO and SSH key. It does not change public networking or
+firewall rules and never touches existing guest domains.
 USAGE
 }
 
@@ -208,7 +211,7 @@ wait_for_guest_ssh() {
     lease_cidr="$(grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}' <<<"$lease_output" | head -n 1 || true)"
     if [[ -n "$lease_cidr" ]]; then
       guest_ip="${lease_cidr%%/*}"
-      if ssh -q -i "$ssh_key_path" -o BatchMode=yes -o ConnectTimeout=2 \
+      if ssh -q -i "$ssh_key_path" -o BatchMode=yes -o ConnectTimeout=2 -o IdentitiesOnly=yes \
         -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         "ubuntu@$guest_ip" true >/dev/null 2>&1; then
         GUEST_IP="$guest_ip"
@@ -225,7 +228,7 @@ wait_for_cloud_init() {
   local phase="$1"
   local status_log="$TEMP_DIR/cloud-init-status-${phase//[^A-Za-z0-9]/-}.log"
   note "$phase: waiting for cloud-init to finish inside Ubuntu."
-  if ! timeout 240 ssh -q -i "$ssh_key_path" -o BatchMode=yes -o ConnectTimeout=5 \
+  if ! timeout 240 ssh -q -i "$ssh_key_path" -o BatchMode=yes -o ConnectTimeout=5 -o IdentitiesOnly=yes \
       -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
       "ubuntu@$GUEST_IP" 'sudo -n cloud-init status --wait --long' >"$status_log" 2>&1; then
     cat "$status_log" >&2
