@@ -54,7 +54,8 @@ jobs:
           libvirt_gid="$(stat -c %g /var/run/libvirt/libvirt-sock)"
           node_path="$(command -v node)"
           echo "Running provider test as the unprivileged runner UID with libvirt GID $libvirt_gid and QEMU GID $qemu_gid."
-          sudo -u runner -g "$(id -gn runner)" -G "$libvirt_gid,$qemu_gid" \
+          sudo setpriv --reuid="$(id -u runner)" --regid="$(id -g runner)" \
+            --groups="$libvirt_gid,$qemu_gid" \
             env BHAI_QEMU_GID="$qemu_gid" \
             "$node_path" --experimental-strip-types scripts/smoke-test-host-agent-kvm.mjs
 
