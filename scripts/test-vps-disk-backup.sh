@@ -11,6 +11,7 @@ domain="bg-00000000000040008000000000000002"
 guest_dir="$vm_storage/$domain"
 mkdir -p "$fake_bin" "$guest_dir" "$backup_dir"
 printf 'FAKE-QCOW2-DISK\n' > "$guest_dir/root.qcow2"
+printf 'FAKE-CLOUD-INIT-ISO\n' > "$guest_dir/cloud-init.iso"
 export PATH="$fake_bin:$PATH"
 export FAKE_VPS_STATE="shut off"
 export FAKE_QEMU_FORMAT="qcow2"
@@ -25,7 +26,7 @@ set -Eeuo pipefail
 case "${3:-}" in
   domstate) printf '%s\n' "${FAKE_VPS_STATE:-shut off}" ;;
   dumpxml)
-    printf "<domain><name>%s</name><devices><disk file='%s'/></devices></domain>\n" "$4" "$FAKE_DOMAIN_DISK"
+    printf "<domain><name>%s</name><memory unit='MiB'>2048</memory><vcpu>2</vcpu><devices><disk type='file' device='disk'><source file='%s'/><target dev='vda' bus='virtio'/></disk><disk type='file' device='cdrom'><source file='%s'/><target dev='sda' bus='sata'/></disk></devices></domain>\n" "$5" "$FAKE_DOMAIN_DISK" "$FAKE_DOMAIN_SEED"
     ;;
   *) echo "Unexpected virsh command: $*" >&2; exit 90 ;;
 esac
@@ -52,6 +53,7 @@ chmod 700 "$fake_bin/"*
 export BHAI_VM_STORAGE="$vm_storage"
 export BHAI_VM_BACKUP_DIR="$backup_dir"
 export FAKE_DOMAIN_DISK="$guest_dir/root.qcow2"
+export FAKE_DOMAIN_SEED="$guest_dir/cloud-init.iso"
 
 # Reject malformed names before making a backup bundle.
 if bash "$root/scripts/backup-vps-disks.sh" "../root.qcow2" > /dev/null 2>&1; then
@@ -82,6 +84,7 @@ output="$(bash "$root/scripts/backup-vps-disks.sh" "$domain")"
 bundle="$(printf '%s\n' "$output" | sed -n 's/^VPS disk backup created: //p')"
 [[ -n "$bundle" && -d "$bundle" ]]
 [[ -s "$bundle/root.qcow2" && -s "$bundle/domain.xml" && -s "$bundle/disk-info.json" && -s "$bundle/manifest.txt" && -s "$bundle/SHA256SUMS" ]]
+[[ -s "$bundle/cloud-init.iso" ]]
 (cd "$bundle" && sha256sum --check SHA256SUMS >/dev/null)
 [[ "$(stat -c '%a' "$bundle/root.qcow2")" == "600" ]]
 [[ "$(stat -c '%a' "$bundle/SHA256SUMS")" == "600" ]]
