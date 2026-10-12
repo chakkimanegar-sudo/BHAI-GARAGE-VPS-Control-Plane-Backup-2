@@ -169,13 +169,16 @@ jobs:
           echo "Compose web, API readiness, and reverse-proxy same-origin POST checks passed."
 
       - name: Check backup script syntax
-        run: bash -n scripts/backup-db.sh scripts/restore-db.sh scripts/test-db-backup.sh scripts/prepare-kvm-host.sh scripts/test-prepare-kvm-host.sh scripts/smoke-test-kvm-host.sh scripts/backup-vps-disks.sh scripts/test-vps-disk-backup.sh
+        run: bash -n scripts/backup-db.sh scripts/restore-db.sh scripts/test-db-backup.sh scripts/prepare-kvm-host.sh scripts/test-prepare-kvm-host.sh scripts/smoke-test-kvm-host.sh scripts/backup-vps-disks.sh scripts/test-vps-disk-backup.sh scripts/restore-vps-disk-backup.sh scripts/test-vps-disk-restore.sh
 
       - name: Test backup rotation and restore safety
         run: bash scripts/test-db-backup.sh
 
       - name: Test offline VPS disk backup safety
         run: bash scripts/test-vps-disk-backup.sh
+
+      - name: Test verified VPS disk restore safety
+        run: sudo bash scripts/test-vps-disk-restore.sh
 
       - name: Test KVM host preparation and preflight
         run: bash scripts/test-prepare-kvm-host.sh

@@ -107,7 +107,17 @@ For a conservative first backup path, power off the VPS cleanly and verify it is
 sudo env BHAI_VM_BACKUP_DIR=/mnt/off-host-backups bash scripts/backup-vps-disks.sh bg-0123456789abcdef0123456789abcdef
 ```
 
-The script refuses running, paused, or crashed guests; refuses a destination that is not a mount point or overlaps live VM storage; validates the source QCOW2; converts it to a standalone image (flattening its backing chain); captures the inactive libvirt domain XML; creates SHA-256 checksums; and publishes the bundle as one atomic directory rename. Verify a bundle with `sha256sum --check SHA256SUMS` from inside that backup directory. This is an **offline** backup and requires downtime; it does not back up the PostgreSQL control plane, provide an automatic restore, or replace scheduled off-host retention and restore drills. Keep the backup mount unavailable to customer guest VMs.
+The script refuses running, paused, or crashed guests; refuses a destination that is not a mount point or overlaps live VM storage; validates the source QCOW2 and inactive domain XML; converts the root disk to a standalone image (flattening its backing chain); includes the managed cloud-init ISO when present; creates SHA-256 checksums; and publishes the bundle as one atomic directory rename. Verify a bundle with `sha256sum --check SHA256SUMS` from inside that backup directory. This is an **offline** backup and requires downtime. Keep the backup mount unavailable to customer guest VMs.
+
+To restore a bundle as a new, inactive libvirt domain, first ensure the original domain name and storage directory are absent, then run this on the KVM host (substitute the actual bundle directory and numeric QEMU group ID):
+
+```sh
+sudo env BHAI_VM_STORAGE=/var/lib/libvirt/images/bhai-garage-vms \
+  BHAI_AGENT_UID=1000 BHAI_QEMU_GID=replace_with_numeric_qemu_group_id \
+  bash scripts/restore-vps-disk-backup.sh /mnt/off-host-backups/bg-0123456789abcdef0123456789abcdef-TIMESTAMP --confirm
+```
+
+Restore verifies the bundle checksum list and each file, checks the standalone QCOW2 image, refuses existing domains/directories, and rebuilds a restricted x86-64 KVM definition on the default NAT network without starting it or restoring a public bridge/IP. It does not restore PostgreSQL/control-plane metadata; reconcile the VPS record and verify networking before starting the guest. Use a separate database backup too, and perform regular restore drills before offering customer hosting.
 
 For the Compose host-agent, configure the host-side image and VM directories, the image map inside the container, and the numeric group ID of the libvirt socket. Starting values after running the helper are:
 
