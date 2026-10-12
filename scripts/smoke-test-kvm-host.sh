@@ -40,7 +40,7 @@ if [[ -z "$QEMU_GID" ]]; then
 fi
 [[ "$QEMU_GID" =~ ^[0-9]+$ ]] || fail "Set BHAI_QEMU_GID to the numeric libvirt-qemu group ID."
 
-for tool in virsh qemu-img cloud-localds realpath grep head cut tr xargs seq; do
+for tool in virsh qemu-img cloud-localds realpath grep head cut tr xargs seq ssh ssh-keygen timeout; do
   command -v "$tool" >/dev/null 2>&1 || fail "Required command is missing: $tool"
 done
 
@@ -59,6 +59,7 @@ if virsh --connect qemu:///system list --all --name | grep -Fxq "$DOMAIN"; then
 fi
 
 TEMP_DIR="$(mktemp -d "$VM_DIR/.kvm-smoke.XXXXXXXX")"
+LIFECYCLE_COMPLETE=0
 # Match production: the setgid folder assigns the libvirt-qemu group to created files.
 chown "$AGENT_UID:$QEMU_GID" "$TEMP_DIR"
 chmod 2710 "$TEMP_DIR"
@@ -66,6 +67,7 @@ disk_path="$TEMP_DIR/root.qcow2"
 seed_path="$TEMP_DIR/cloud-init.iso"
 user_data_path="$TEMP_DIR/user-data"
 meta_data_path="$TEMP_DIR/meta-data"
+ssh_key_path="$TEMP_DIR/id_ed25519"
 domain_xml_path="$TEMP_DIR/domain.xml"
 
 cleanup() {
@@ -97,6 +99,9 @@ cleanup() {
 
   if [[ "$cleanup_status" -eq 0 ]]; then
     rm -rf -- "$TEMP_DIR"
+    if [[ "$original_status" -eq 0 && "$LIFECYCLE_COMPLETE" -eq 1 && ! -e "$TEMP_DIR" ]]; then
+      pass "Temporary VM storage and ephemeral SSH key deleted."
+    fi
   else
     printf 'ERROR: Could not fully remove temporary domain %s; preserving files at %s for manual recovery.\n' "$DOMAIN" "$TEMP_DIR" >&2
   fi
@@ -114,8 +119,16 @@ chown "$AGENT_UID:$AGENT_GID" "$TEMP_DIR"
 qemu-img create -f qcow2 -F qcow2 -b "$IMAGE_PATH" "$disk_path" 8G
 chown "$AGENT_UID:$QEMU_GID" "$disk_path"
 chmod 0660 "$disk_path"
-cat > "$user_data_path" <<'USERDATA'
+ssh-keygen -q -t ed25519 -N "" -f "$ssh_key_path" -C "$DOMAIN-smoke-test"
+ssh_public_key="$(cat "$ssh_key_path.pub")"
+cat > "$user_data_path" <<USERDATA
 #cloud-config
+users:
+  - default
+  - name: ubuntu
+    lock_passwd: true
+    ssh_authorized_keys:
+      - $ssh_public_key
 ssh_pwauth: false
 disable_root: true
 USERDATA
@@ -161,25 +174,86 @@ cat > "$domain_xml_path" <<XML
 XML
 chmod 0640 "$domain_xml_path"
 
+wait_for_guest_ssh() {
+  local phase="$1"
+  local state lease_output lease_cidr guest_ip
+  guest_ip=""
+  note "$phase: waiting for a DHCP lease and reachable SSH (up to five minutes)."
+  for attempt in $(seq 1 150); do
+    state="$(virsh --connect qemu:///system domstate "$DOMAIN" 2>/dev/null | tr '[:upper:]' '[:lower:]' | xargs || true)"
+    [[ "$state" != "shut off" && "$state" != "shutoff" && "$state" != "crashed" ]] ||
+      fail "$DOMAIN stopped during $phase before guest reachability (state: $state)."
+
+    lease_output="$(virsh --connect qemu:///system domifaddr "$DOMAIN" --source lease 2>/dev/null || true)"
+    lease_cidr="$(grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}' <<<"$lease_output" | head -n 1 || true)"
+    if [[ -n "$lease_cidr" ]]; then
+      guest_ip="${lease_cidr%%/*}"
+      if ssh -q -i "$ssh_key_path" -o BatchMode=yes -o ConnectTimeout=2 \
+        -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        "ubuntu@$guest_ip" true >/dev/null 2>&1; then
+        GUEST_IP="$guest_ip"
+        pass "$phase: guest SSH is reachable at private NAT IP $GUEST_IP."
+        return 0
+      fi
+    fi
+    sleep 2
+  done
+  fail "$DOMAIN did not become SSH-reachable on libvirt NAT during $phase."
+}
+
+wait_for_cloud_init() {
+  local phase="$1"
+  local status_log="$TEMP_DIR/cloud-init-status-${phase//[^A-Za-z0-9]/-}.log"
+  note "$phase: waiting for cloud-init to finish inside Ubuntu."
+  if ! timeout 240 ssh -q -i "$ssh_key_path" -o BatchMode=yes -o ConnectTimeout=5 \
+      -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+      "ubuntu@$GUEST_IP" 'sudo -n cloud-init status --wait --long' >"$status_log" 2>&1; then
+    cat "$status_log" >&2
+    fail "Guest cloud-init did not complete successfully during $phase."
+  fi
+  if ! grep -Eq 'status:[[:space:]]*done' "$status_log"; then
+    cat "$status_log" >&2
+    fail "Guest cloud-init did not report status: done during $phase."
+  fi
+  pass "$phase: cloud-init status is done."
+}
+
+wait_for_guest_ready() {
+  wait_for_guest_ssh "$1"
+  wait_for_cloud_init "$1"
+}
+
+wait_for_domain_stopped() {
+  local state
+  for attempt in $(seq 1 30); do
+    state="$(virsh --connect qemu:///system domstate "$DOMAIN" 2>/dev/null | tr '[:upper:]' '[:lower:]' | xargs || true)"
+    if [[ "$state" == "shut off" || "$state" == "shutoff" ]]; then
+      pass "$DOMAIN reached shut-off state."
+      return 0
+    fi
+    sleep 2
+  done
+  fail "$DOMAIN did not shut down cleanly within 60 seconds."
+}
+
 virsh --connect qemu:///system define "$domain_xml_path" >/dev/null
 virsh --connect qemu:///system start "$DOMAIN" >/dev/null
-note "Temporary guest $DOMAIN started; waiting up to five minutes for a default-NAT DHCP lease."
+wait_for_guest_ready "initial boot"
 
-guest_ip=""
-for attempt in $(seq 1 150); do
-  state="$(virsh --connect qemu:///system domstate "$DOMAIN" 2>/dev/null | tr '[:upper:]' '[:lower:]' | xargs || true)"
-  [[ "$state" != "shut off" && "$state" != "shutoff" && "$state" != "crashed" ]] ||
-    fail "Temporary KVM guest stopped before obtaining a DHCP lease (state: $state)."
+virsh --connect qemu:///system shutdown "$DOMAIN" >/dev/null
+wait_for_domain_stopped
+pass "Guest stop lifecycle succeeded."
 
-  lease_output="$(virsh --connect qemu:///system domifaddr "$DOMAIN" --source lease 2>/dev/null || true)"
-  lease_cidr="$(grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}' <<<"$lease_output" | head -n 1 || true)"
-  if [[ -n "$lease_cidr" ]]; then
-    guest_ip="${lease_cidr%%/*}"
-    break
-  fi
-  sleep 2
-done
+virsh --connect qemu:///system start "$DOMAIN" >/dev/null
+wait_for_guest_ready "start after stop"
+pass "Guest start lifecycle succeeded after a clean shutdown."
 
-[[ -n "$guest_ip" ]] || fail "Guest did not receive a DHCP lease from libvirt's default NAT network within five minutes."
-pass "Real x86-64 KVM guest reached running state and received private NAT IP $guest_ip."
-note "The EXIT cleanup will now undefine $DOMAIN and remove its temporary disk/configuration."
+virsh --connect qemu:///system shutdown "$DOMAIN" >/dev/null
+wait_for_domain_stopped
+virsh --connect qemu:///system undefine "$DOMAIN" --nvram >/dev/null 2>&1 ||
+  virsh --connect qemu:///system undefine "$DOMAIN" >/dev/null
+if virsh --connect qemu:///system list --all --name | grep -Fxq "$DOMAIN"; then
+  fail "Temporary domain still exists after undefine: $DOMAIN"
+fi
+LIFECYCLE_COMPLETE=1
+pass "Guest delete lifecycle succeeded: domain undefined; cleanup will verify disk/key removal."
