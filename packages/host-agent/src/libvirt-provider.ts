@@ -196,7 +196,7 @@ export class LibvirtProvider implements VirtualizationProvider {
     }
 
     const networkInfo = await this.virsh(["net-info", this.config.libvirtNetwork], 10_000);
-    if (!networkInfo.split("\n").some((line) => line.trim() === "Active: yes")) {
+    if (!networkInfo.split("\n").some((line) => /^\s*Active:\s+yes\s*$/i.test(line))) {
       throw new Error(`The configured libvirt network "${this.config.libvirtNetwork}" must be active`);
     }
 

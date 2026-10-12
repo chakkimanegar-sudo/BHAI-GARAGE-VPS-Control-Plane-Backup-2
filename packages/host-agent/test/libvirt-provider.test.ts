@@ -190,7 +190,7 @@ test("libvirt outages and unconfirmed rollback preserve VPS storage", async () =
       'case "$3" in',
       '  uri) echo "qemu:///system"; exit 0 ;;',
       "  capabilities) printf \"<capabilities><host><cpu><arch>x86_64</arch></cpu></host><guest><arch name='x86_64'><domain type='kvm'></domain></arch></guest></capabilities>\\n\"; exit 0 ;;",
-      '  net-info) printf "Name: default\\nActive: yes\\n"; exit 0 ;;',
+      '  net-info) printf "Name: default\\nActive:       yes\\n"; exit 0 ;;',
       '  list) if [ -f "' + stateFile + '" ]; then echo "' + DOMAIN + '"; fi; exit 0 ;;',
       '  define) touch "' + stateFile + '"; exit 0 ;;',
       '  domstate) echo "shut off"; exit 0 ;;',
