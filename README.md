@@ -185,7 +185,7 @@ Real provisioning requires a Linux machine you control or rent, with hardware vi
 
 The agent sets vCPU and RAM in libvirt domain definitions and creates a QCOW2 overlay with the requested virtual capacity. Images must be cloud-init compatible. The configured virtual network must provide guest connectivity and DHCP leases for IP reporting. Confirm CPU architecture, image format, disk capacity, bridge/firewall policy, inbound SSH reachability, and guest initialization on your own host before offering the service to anyone.
 
-**Live-host requirement:** CI validates the smoke-test script and host-agent unit tests but does not boot a real guest. After `--install` and `--check` pass on the actual host, run `sudo bash scripts/smoke-test-kvm-host.sh`. Require a real guest boot plus private NAT DHCP lease before switching the control plane to real provisioning. No compatible KVM host is connected to this development environment, so that hardware-level proof remains outstanding.
+**Live-host requirement:** pull-request CI runs a real guest boot and, when the hosted runner exposes KVM, also exercises the production `LibvirtProvider` through create/stop/start/restart/delete. This proves the tested code can manage an ephemeral guest on that runner; it does not provision a persistent customer host. On your actual rented or owned KVM host, run `sudo bash scripts/prepare-kvm-host.sh --check` and `sudo bash scripts/smoke-test-kvm-host.sh`, then register the host and verify its fresh heartbeat before switching the control plane to real provisioning.
 
 ## API overview
 
