@@ -169,7 +169,7 @@ jobs:
           echo "Compose web, API readiness, and reverse-proxy same-origin POST checks passed."
 
       - name: Check backup script syntax
-        run: bash -n scripts/backup-db.sh scripts/restore-db.sh scripts/test-db-backup.sh scripts/prepare-kvm-host.sh scripts/test-prepare-kvm-host.sh scripts/smoke-test-kvm-host.sh scripts/backup-vps-disks.sh scripts/test-vps-disk-backup.sh scripts/restore-vps-disk-backup.sh scripts/test-vps-disk-restore.sh
+        run: bash -n scripts/backup-db.sh scripts/restore-db.sh scripts/test-db-backup.sh scripts/prepare-kvm-host.sh scripts/test-prepare-kvm-host.sh scripts/smoke-test-kvm-host.sh scripts/backup-vps-disks.sh scripts/test-vps-disk-backup.sh scripts/restore-vps-disk-backup.sh scripts/test-vps-disk-restore.sh scripts/test-kvm-smoke-lifecycle.sh
 
       - name: Test backup rotation and restore safety
         run: bash scripts/test-db-backup.sh
@@ -187,6 +187,9 @@ jobs:
         env:
           BHAI_QEMU_GID: "640"
         run: bash scripts/smoke-test-kvm-host.sh --help
+
+      - name: Test KVM smoke-test lifecycle with isolated command fakes
+        run: sudo bash scripts/test-kvm-smoke-lifecycle.sh
 
       - name: Test host agent
         run: pnpm --filter @workspace/host-agent run test
