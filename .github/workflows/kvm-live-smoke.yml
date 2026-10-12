@@ -43,7 +43,7 @@ jobs:
 
       - name: Boot, verify, restart and remove a real Ubuntu guest
         if: steps.kvm.outputs.available == 'true'
-        run: sudo bash scripts/smoke-test-kvm-host.sh
+        run: sudo env BHAI_AGENT_UID="$(id -u runner)" BHAI_AGENT_GID="$(id -g runner)" bash scripts/smoke-test-kvm-host.sh
 
       - name: Exercise the real host-agent provider against KVM
         if: steps.kvm.outputs.available == 'true'
