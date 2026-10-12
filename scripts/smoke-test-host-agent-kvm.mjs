@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { execFile as execFileCallback } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { LibvirtProvider } from "../packages/host-agent/src/libvirt-provider.ts";
 
@@ -31,7 +32,7 @@ const config = {
 const provider = new LibvirtProvider(config);
 const tempDirectory = await mkdtemp(path.join(os.tmpdir(), "bhai-garage-agent-kvm-"));
 const keyPath = path.join(tempDirectory, "id_ed25519");
-const vpsId = (await import("node:crypto")).randomUUID();
+const vpsId = randomUUID();
 const domain = `bg-${vpsId.replaceAll("-", "").toLowerCase()}`;
 const operationBase = {
   id: (await import("node:crypto")).randomUUID(),
