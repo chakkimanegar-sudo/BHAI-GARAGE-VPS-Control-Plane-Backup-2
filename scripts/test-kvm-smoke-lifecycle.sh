@@ -130,9 +130,9 @@ for expected in \
   }
 done
 
-[[ "$(grep -c '^start ' "$state_dir/virsh.log")" -eq 2 ]]
-[[ "$(grep -c '^shutdown ' "$state_dir/virsh.log")" -eq 2 ]]
-[[ "$(grep -c '^undefine ' "$state_dir/virsh.log")" -eq 1 ]]
+[[ "$(grep -c ' start ' "$state_dir/virsh.log")" -eq 2 ]]
+[[ "$(grep -c ' shutdown ' "$state_dir/virsh.log")" -eq 2 ]]
+[[ "$(grep -c ' undefine ' "$state_dir/virsh.log")" -eq 1 ]]
 [[ "$(grep -c '^sudo -n cloud-init status --wait --long$' "$state_dir/ssh.log")" -eq 2 ]]
 [[ ! -e "$state_dir/domain" ]]
 if find "$vm_dir" -mindepth 1 -maxdepth 1 -name '.kvm-smoke.*' -print -quit | grep -q .; then
