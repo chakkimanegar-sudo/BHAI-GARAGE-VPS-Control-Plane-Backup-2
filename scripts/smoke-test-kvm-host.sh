@@ -176,10 +176,11 @@ chmod 0640 "$domain_xml_path"
 
 wait_for_guest_ssh() {
   local phase="$1"
-  local state lease_output lease_cidr guest_ip
+  local state lease_output lease_cidr guest_ip deadline
   guest_ip=""
+  deadline=$((SECONDS + 300))
   note "$phase: waiting for a DHCP lease and reachable SSH (up to five minutes)."
-  for attempt in $(seq 1 150); do
+  while (( SECONDS < deadline )); do
     state="$(virsh --connect qemu:///system domstate "$DOMAIN" 2>/dev/null | tr '[:upper:]' '[:lower:]' | xargs || true)"
     [[ "$state" != "shut off" && "$state" != "shutoff" && "$state" != "crashed" ]] ||
       fail "$DOMAIN stopped during $phase before guest reachability (state: $state)."
