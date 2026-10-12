@@ -95,9 +95,9 @@ restored="$vm_storage/$first_domain"
 [[ "$(stat -c '%a' "$restored/root.qcow2")" == "660" ]]
 [[ "$(stat -c '%a' "$restored/cloud-init.iso")" == "640" ]]
 grep -Fxq "$first_domain" "$domains_file"
-grep -Fq "file='$restored/root.qcow2'" "$restored/domain.xml"
-grep -Fq "network='default'" "$restored/domain.xml"
-! grep -Fq "type='bridge'" "$restored/domain.xml"
+grep -Fq "file=\"$restored/root.qcow2\"" "$restored/domain.xml"
+grep -Fq 'network="default"' "$restored/domain.xml"
+! grep -Fq 'type="bridge"' "$restored/domain.xml"
 
 before="$(sha256sum "$restored/root.qcow2")"
 if bash "$root/scripts/restore-vps-disk-backup.sh" "$first_bundle" --confirm > /dev/null 2>&1; then
