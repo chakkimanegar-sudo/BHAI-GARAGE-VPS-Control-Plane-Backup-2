@@ -2,6 +2,8 @@
 set -Eeuo pipefail
 
 readonly IMAGE_FILE="noble-server-cloudimg-amd64.img"
+# Keep the on-host path stable for existing BHAI_IMAGES_JSON configuration.
+readonly UPSTREAM_IMAGE_FILE="ubuntu-24.04-server-cloudimg-amd64.img"
 readonly IMAGE_URL="https://cloud-images.ubuntu.com/releases/noble/release"
 readonly LIBVIRT_IMAGE_ROOT="/var/lib/libvirt/images"
 
@@ -88,8 +90,8 @@ fetch_verified_manifest() {
   [[ -s "$keyring" ]] || fail "Ubuntu cloud-image signing keyring is missing."
 
   gpgv --keyring "$keyring" "$temp_dir/SHA256SUMS.gpg" "$temp_dir/SHA256SUMS"
-  grep -Fq "  $IMAGE_FILE" "$temp_dir/SHA256SUMS" ||
-    fail "Official SHA256SUMS has no entry for $IMAGE_FILE."
+  grep -Fq "$UPSTREAM_IMAGE_FILE" "$temp_dir/SHA256SUMS" ||
+    fail "Official SHA256SUMS has no entry for $UPSTREAM_IMAGE_FILE."
 }
 
 verify_image_checksum_record() {
@@ -247,8 +249,9 @@ if [[ "$MODE" == "install" ]]; then
       temp_dir="$(mktemp -d)"
       trap 'rm -rf -- "$temp_dir"' EXIT
       fetch_verified_manifest "$temp_dir"
-      checksum_output="$(cd "$IMAGE_DIR" && sha256sum --check --ignore-missing "$temp_dir/SHA256SUMS")"
-      printf '%s\n' "$checksum_output" | grep -Fxq "$IMAGE_FILE: OK" ||
+      expected_digest="$(awk -v filename="$UPSTREAM_IMAGE_FILE" '$2 == filename || $2 == ("*" filename) { print $1; exit }' "$temp_dir/SHA256SUMS")"
+      actual_digest="$(sha256sum "$IMAGE_PATH" | awk '{ print $1 }')"
+      [[ "$expected_digest" =~ ^[[:xdigit:]]{64}$ && "$actual_digest" == "$expected_digest" ]] ||
         fail "Existing cloud image has no trusted checksum record and does not match the signed current release; preserve any VM disks and investigate before replacing it."
       write_image_checksum_record "$IMAGE_DIR" "$IMAGE_FILE" "$CHECKSUM_PATH" "$temp_dir/image.sha256"
       rm -rf -- "$temp_dir"
@@ -259,12 +262,12 @@ if [[ "$MODE" == "install" ]]; then
     trap 'rm -rf -- "$temp_dir"' EXIT
     fetch_verified_manifest "$temp_dir"
     curl --fail --location --retry 3 --connect-timeout 15 --max-time 900 \
-      --silent --show-error "$IMAGE_URL/$IMAGE_FILE" --output "$temp_dir/$IMAGE_FILE"
+      --silent --show-error "$IMAGE_URL/$UPSTREAM_IMAGE_FILE" --output "$temp_dir/$UPSTREAM_IMAGE_FILE"
     checksum_output="$(cd "$temp_dir" && sha256sum --check --ignore-missing SHA256SUMS)"
-    printf '%s\n' "$checksum_output" | grep -Fxq "$IMAGE_FILE: OK" ||
+    printf '%s\n' "$checksum_output" | grep -Fxq "$UPSTREAM_IMAGE_FILE: OK" ||
       fail "Ubuntu cloud image did not match Canonical's signed SHA-256 checksum."
 
-    install -o root -g root -m 0644 "$temp_dir/$IMAGE_FILE" "$IMAGE_PATH"
+    install -o root -g root -m 0644 "$temp_dir/$UPSTREAM_IMAGE_FILE" "$IMAGE_PATH"
     write_image_checksum_record "$IMAGE_DIR" "$IMAGE_FILE" "$CHECKSUM_PATH" "$temp_dir/image.sha256"
     rm -rf -- "$temp_dir"
     trap - EXIT
