@@ -54,7 +54,9 @@ IMAGE_PATH="$IMAGE_DIR/$IMAGE_FILE"
 
 token="$(tr -d '-' < /proc/sys/kernel/random/uuid | cut -c1-12)"
 DOMAIN="bhai-garage-smoke-$token"
-if virsh --connect qemu:///system list --all --name | grep -Fxq "$DOMAIN"; then
+existing_domains="$(virsh --connect qemu:///system list --all --name)" ||
+  fail "Cannot query libvirt domains; refusing to create a smoke-test guest."
+if grep -Fxq "$DOMAIN" <<<"$existing_domains"; then
   fail "Generated test domain name already exists; refusing to touch it: $DOMAIN"
 fi
 
