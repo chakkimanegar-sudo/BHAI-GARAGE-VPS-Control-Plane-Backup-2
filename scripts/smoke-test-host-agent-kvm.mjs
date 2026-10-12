@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { execFile as execFileCallback } from "node:child_process";
@@ -31,10 +31,10 @@ const config = {
 const provider = new LibvirtProvider(config);
 const tempDirectory = await mkdtemp(path.join(os.tmpdir(), "bhai-garage-agent-kvm-"));
 const keyPath = path.join(tempDirectory, "id_ed25519");
-const vpsId = crypto.randomUUID();
+const vpsId = (await import("node:crypto")).randomUUID();
 const domain = `bg-${vpsId.replaceAll("-", "").toLowerCase()}`;
 const operationBase = {
-  id: crypto.randomUUID(),
+  id: (await import("node:crypto")).randomUUID(),
   sshPublicKey: null,
   vps: {
     id: vpsId,
@@ -143,7 +143,7 @@ try {
   const remaining = (await execFile("virsh", ["--connect", "qemu:///system", "list", "--all", "--name"])).stdout
     .split(/\r?\n/).map((name) => name.trim()).filter(Boolean);
   assert.equal(remaining.includes(domain), false, "host-agent delete must undefine the test domain");
-  await assert.rejects(readFile(path.join(storageDirectory, domain)), { code: "ENOENT" });
+  await assert.rejects(stat(path.join(storageDirectory, domain)), { code: "ENOENT" });
   log("Production LibvirtProvider.delete completed; domain and managed storage removed.");
   log("PASS: real KVM guest exercised through the actual host-agent provider lifecycle.");
 } finally {
