@@ -118,7 +118,6 @@ IFS=$'\t' read -r checked_domain memory_mib vcpus <<<"$details"
 
 created=0
 define_attempted=0
-completed=0
 cleanup() {
   local status=$?
   trap - EXIT
@@ -133,8 +132,10 @@ cleanup() {
 }
 trap cleanup EXIT
 umask 077
-install -d -o "$agent_uid" -g "$qemu_gid" -m 2710 "$target_dir"
+mkdir -- "$target_dir"
 created=1
+chown "$agent_uid:$qemu_gid" "$target_dir"
+chmod 2710 "$target_dir"
 cp --reflink=auto -- "$bundle_real/root.qcow2" "$target_dir/root.qcow2"
 chown "$agent_uid:$qemu_gid" "$target_dir/root.qcow2"
 chmod 0660 "$target_dir/root.qcow2"
@@ -194,7 +195,6 @@ chmod 2710 "$target_dir"
 if virsh --connect qemu:///system list --all --name | grep -Fxq "$domain"; then fail "Domain appeared during restore; refusing to define."; fi
 define_attempted=1
 virsh --connect qemu:///system define "$target_dir/domain.xml"
-completed=1
 printf 'VPS disk restored and domain defined (not started): %s\n' "$domain"
 printf 'Disk: %s/root.qcow2\n' "$target_dir"
 printf 'Network: default libvirt NAT (no public IP or bridge restored).\n'
