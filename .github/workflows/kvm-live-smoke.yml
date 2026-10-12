@@ -1,0 +1,50 @@
+name: KVM live guest smoke test
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/kvm-live-smoke.yml"
+      - "scripts/prepare-kvm-host.sh"
+      - "scripts/smoke-test-kvm-host.sh"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-guest-smoke:
+    name: Probe KVM and run a real Ubuntu guest when available
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Probe runner hardware virtualization
+        id: kvm
+        shell: bash
+        run: |
+          if [[ -e /dev/kvm ]] && grep -Eiq '(^|[[:space:]])(vmx|svm)([[:space:]]|$)' /proc/cpuinfo; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "KVM device and CPU virtualization flags are exposed."
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::This hosted runner does not expose KVM; a real guest boot cannot be tested in this run."
+            [[ -e /dev/kvm ]] || echo "Missing /dev/kvm"
+            grep -Eio 'vmx|svm' /proc/cpuinfo | sort -u || true
+          fi
+
+      - name: Install and prepare KVM host
+        if: steps.kvm.outputs.available == 'true'
+        run: sudo bash scripts/prepare-kvm-host.sh --install
+
+      - name: Boot, verify, restart and remove a real Ubuntu guest
+        if: steps.kvm.outputs.available == 'true'
+        run: sudo bash scripts/smoke-test-kvm-host.sh
+
+      - name: Report that real guest verification was unavailable
+        if: steps.kvm.outputs.available != 'true'
+        run: |
+          echo "No live guest result: this runner lacks exposed KVM hardware virtualization."
+          echo "The mocked lifecycle tests do not count as a real VM boot."
