@@ -73,26 +73,43 @@ domain_xml_path="$TEMP_DIR/domain.xml"
 cleanup() {
   local original_status=$?
   local cleanup_status=0
+  local domain_list state list_status stop_status
   trap - EXIT
   set +e
 
-  if virsh --connect qemu:///system list --all --name 2>/dev/null | grep -Fxq "$DOMAIN"; then
-    local state
-    state="$(virsh --connect qemu:///system domstate "$DOMAIN" 2>/dev/null | tr '[:upper:]' '[:lower:]' | xargs)"
-    if [[ "$state" != "shut off" && "$state" != "shutoff" && "$state" != "crashed" ]]; then
-      virsh --connect qemu:///system destroy "$DOMAIN" >/dev/null 2>&1
-      local stop_status=$?
-      if [[ "$stop_status" -ne 0 ]]; then
-        state="$(virsh --connect qemu:///system domstate "$DOMAIN" 2>/dev/null | tr '[:upper:]' '[:lower:]' | xargs)"
-        [[ "$state" == "shut off" || "$state" == "shutoff" || "$state" == "crashed" ]] || cleanup_status=1
+  domain_list="$(virsh --connect qemu:///system list --all --name 2>/dev/null)"
+  list_status=$?
+  if [[ "$list_status" -ne 0 ]]; then
+    cleanup_status=1
+    printf 'ERROR: Cannot confirm libvirt domain state; preserving temporary files at %s.\n' "$TEMP_DIR" >&2
+  elif grep -Fxq "$DOMAIN" <<<"$domain_list"; then
+    if ! state="$(virsh --connect qemu:///system domstate "$DOMAIN" 2>/dev/null)"; then
+      cleanup_status=1
+    else
+      state="$(tr '[:upper:]' '[:lower:]' <<<"$state" | xargs)"
+      if [[ "$state" != "shut off" && "$state" != "shutoff" && "$state" != "crashed" ]]; then
+        virsh --connect qemu:///system destroy "$DOMAIN" >/dev/null 2>&1
+        stop_status=$?
+        if [[ "$stop_status" -ne 0 ]]; then
+          if ! state="$(virsh --connect qemu:///system domstate "$DOMAIN" 2>/dev/null)"; then
+            cleanup_status=1
+          else
+            state="$(tr '[:upper:]' '[:lower:]' <<<"$state" | xargs)"
+            [[ "$state" == "shut off" || "$state" == "shutoff" || "$state" == "crashed" ]] || cleanup_status=1
+          fi
+        fi
       fi
-    fi
 
-    if [[ "$cleanup_status" -eq 0 ]]; then
-      virsh --connect qemu:///system undefine "$DOMAIN" --nvram >/dev/null 2>&1 ||
-        virsh --connect qemu:///system undefine "$DOMAIN" >/dev/null 2>&1
-      if virsh --connect qemu:///system list --all --name 2>/dev/null | grep -Fxq "$DOMAIN"; then
-        cleanup_status=1
+      if [[ "$cleanup_status" -eq 0 ]]; then
+        if ! virsh --connect qemu:///system undefine "$DOMAIN" --nvram >/dev/null 2>&1; then
+          virsh --connect qemu:///system undefine "$DOMAIN" >/dev/null 2>&1
+          [[ "$?" -eq 0 ]] || cleanup_status=1
+        fi
+        domain_list="$(virsh --connect qemu:///system list --all --name 2>/dev/null)"
+        list_status=$?
+        if [[ "$list_status" -ne 0 ]] || grep -Fxq "$DOMAIN" <<<"$domain_list"; then
+          cleanup_status=1
+        fi
       fi
     fi
   fi
@@ -103,7 +120,7 @@ cleanup() {
       pass "Temporary VM storage and ephemeral SSH key deleted."
     fi
   else
-    printf 'ERROR: Could not fully remove temporary domain %s; preserving files at %s for manual recovery.\n' "$DOMAIN" "$TEMP_DIR" >&2
+    printf 'ERROR: Could not fully clean up temporary domain %s; preserving files at %s for manual recovery.\n' "$DOMAIN" "$TEMP_DIR" >&2
   fi
 
   if [[ "$original_status" -eq 0 && "$cleanup_status" -ne 0 ]]; then
