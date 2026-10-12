@@ -90,7 +90,7 @@ fetch_verified_manifest() {
   [[ -s "$keyring" ]] || fail "Ubuntu cloud-image signing keyring is missing."
 
   gpgv --keyring "$keyring" "$temp_dir/SHA256SUMS.gpg" "$temp_dir/SHA256SUMS"
-  grep -Fq "  $UPSTREAM_IMAGE_FILE" "$temp_dir/SHA256SUMS" ||
+  grep -Fq "$UPSTREAM_IMAGE_FILE" "$temp_dir/SHA256SUMS" ||
     fail "Official SHA256SUMS has no entry for $UPSTREAM_IMAGE_FILE."
 }
 
@@ -249,7 +249,7 @@ if [[ "$MODE" == "install" ]]; then
       temp_dir="$(mktemp -d)"
       trap 'rm -rf -- "$temp_dir"' EXIT
       fetch_verified_manifest "$temp_dir"
-      expected_digest="$(awk -v filename="$UPSTREAM_IMAGE_FILE" '$2 == filename { print $1; exit }' "$temp_dir/SHA256SUMS")"
+      expected_digest="$(awk -v filename="$UPSTREAM_IMAGE_FILE" '$2 == filename || $2 == ("*" filename) { print $1; exit }' "$temp_dir/SHA256SUMS")"
       actual_digest="$(sha256sum "$IMAGE_PATH" | awk '{ print $1 }')"
       [[ "$expected_digest" =~ ^[[:xdigit:]]{64}$ && "$actual_digest" == "$expected_digest" ]] ||
         fail "Existing cloud image has no trusted checksum record and does not match the signed current release; preserve any VM disks and investigate before replacing it."
